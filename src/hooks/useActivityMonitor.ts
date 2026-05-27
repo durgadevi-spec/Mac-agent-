@@ -7,6 +7,7 @@ export interface ActivityData {
   activeSeconds: number;
   idleSeconds: number;
   productiveSeconds: number;
+  awaySeconds: number;
   sessionSeconds: number;
   currentApp: string;
   windowTitle: string;
@@ -20,6 +21,7 @@ export function useActivityMonitor(enabled: boolean) {
     activeSeconds: 0,
     idleSeconds: 0,
     productiveSeconds: 0,
+    awaySeconds: 0,
     sessionSeconds: 0,
     currentApp: 'Unknown',
     windowTitle: 'Unknown',
@@ -37,6 +39,7 @@ export function useActivityMonitor(enabled: boolean) {
         activeSeconds: latest.activeSeconds,
         idleSeconds: latest.idleSeconds,
         productiveSeconds: latest.productiveSeconds,
+        awaySeconds: latest.awaySeconds ?? 0,
         sessionSeconds: latest.sessionSeconds,
         currentApp: latest.activeWindow?.appName ?? 'Unknown',
         windowTitle: latest.activeWindow?.windowTitle ?? 'Unknown',

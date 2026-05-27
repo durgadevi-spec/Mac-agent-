@@ -7,7 +7,6 @@ type PlanPhase = 'form' | 'summary' | 'punch' | 'punch_no';
 
 interface PlanOfDayProps {
   employee: Employee;
-  session: WorkSession;
   onComplete: (session: WorkSession) => void;
   windowLocked?: boolean;
   planSubmitted?: boolean;
@@ -20,7 +19,6 @@ interface PlanOfDayProps {
 
 export default function PlanOfDay({
   employee,
-  session,
   onComplete,
   windowLocked = true,
   onSummarySubmitted,
@@ -58,9 +56,28 @@ export default function PlanOfDay({
     try {
       const todaySession = await getTodaySession(employee.id);
 
-      if (todaySession?.plan_submitted) {
+      if (todaySession && todaySession.plan_submitted) {
         onSummarySubmitted?.();
         console.log('✓ Plan submission verified');
+        setPhase('punch');
+        return;
+      }
+
+      // Fallback: check the remote timesheet DB before rejecting
+      let externallySubmitted = false;
+      try {
+        console.log('[PlanOfDay] Checking electronAPI:', !!(window as any).electronAPI?.checkTimesheetDb);
+        if (typeof window !== 'undefined' && (window as any).electronAPI?.checkTimesheetDb) {
+          externallySubmitted = await (window as any).electronAPI.checkTimesheetDb(employee.employee_code);
+          console.log('[PlanOfDay] externallySubmitted result:', externallySubmitted);
+        }
+      } catch (e) {
+        console.error('[PlanOfDay] Failed to check remote timesheet DB', e);
+      }
+
+      if (externallySubmitted) {
+        onSummarySubmitted?.();
+        console.log('✓ Plan submission verified via remote DB');
         setPhase('punch');
         return;
       }
@@ -85,8 +102,30 @@ export default function PlanOfDay({
     try {
       const todaySession = await getTodaySession(employee.id);
 
-      if (!todaySession?.plan_submitted) {
-        setPunchError('Plan submission could not be verified. Please submit your plan before punching in.');
+      if (!todaySession || !todaySession.plan_submitted) {
+        // Fallback: check the remote timesheet DB before rejecting
+        let externallySubmitted = false;
+        try {
+          console.log('[PlanOfDay] Checking electronAPI:', !!(window as any).electronAPI?.checkTimesheetDb);
+          if (typeof window !== 'undefined' && (window as any).electronAPI?.checkTimesheetDb) {
+            externallySubmitted = await (window as any).electronAPI.checkTimesheetDb(employee.employee_code);
+            console.log('[PlanOfDay] externallySubmitted result:', externallySubmitted);
+          }
+        } catch (e) {
+          console.error('[PlanOfDay] Failed to check remote timesheet DB', e);
+        }
+
+        if (!externallySubmitted) {
+          setPunchError('Plan submission could not be verified. Please submit your plan before punching in.');
+          return;
+        }
+        
+        // If it was submitted externally, we should ideally mark it true locally
+        // so we don't have to check again, but allowing punch in is the main goal.
+      }
+
+      if (!todaySession) {
+        setPunchError('Unable to load session. Please try again.');
         return;
       }
 

@@ -47,6 +47,12 @@ export interface ActivityLog {
 
 let idleThresholdSeconds = 60 * 10; // Default 10 minutes
 const activityFileName = 'activity-logs.json';
+
+// Track the current date for midnight rollover detection
+let currentTrackingDate: string = new Date().toISOString().slice(0, 10);
+
+// Health reminder interval reference so we can clear it on stop
+let healthReminderInterval: NodeJS.Timeout | null = null;
 const maxStoredLogs = 200;
 
 // Browser URL events received from Chrome extension or local server
@@ -336,6 +342,14 @@ function sendStateUpdate() {
 
 async function refreshActivity() {
   try {
+    // Midnight rollover: if the date changed, reset counters for the new day
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (todayStr !== currentTrackingDate) {
+      console.log(`[Monitor] Day changed from ${currentTrackingDate} to ${todayStr} — resetting counters`);
+      resetSessionCounters();
+      currentTrackingDate = todayStr;
+    }
+
     let ownerName = 'Unknown';
     let windowTitle = 'Unknown';
 
@@ -546,12 +560,14 @@ function createReminderWindow(message: string) {
 }
 
 function scheduleHealthReminder() {
-  setInterval(showGlobalWaterReminder, 60 * 60 * 1000);
+  if (healthReminderInterval) return; // already scheduled
+  healthReminderInterval = setInterval(showGlobalWaterReminder, 60 * 60 * 1000);
 }
 
 export function startBackgroundMonitoring() {
   if (monitoringStarted) return;
   monitoringStarted = true;
+  currentTrackingDate = new Date().toISOString().slice(0, 10);
   writePsScriptIfNotExist();
   loadLogsFromDisk();
   // Pre-load systeminformation in background
@@ -560,4 +576,21 @@ export function startBackgroundMonitoring() {
   monitorInterval = setInterval(refreshActivity, 1000);
   scheduleHealthReminder();
   console.log('[Monitor] Background monitoring started (self-contained, no ActivityWatch)');
+}
+
+export function stopBackgroundMonitoring() {
+  if (monitorInterval) {
+    clearInterval(monitorInterval);
+    monitorInterval = null;
+  }
+  if (healthReminderInterval) {
+    clearInterval(healthReminderInterval);
+    healthReminderInterval = null;
+  }
+  // Close out any in-progress activity log
+  if (currentLog) {
+    closeCurrentLog(new Date());
+  }
+  monitoringStarted = false;
+  console.log('[Monitor] Background monitoring stopped');
 }

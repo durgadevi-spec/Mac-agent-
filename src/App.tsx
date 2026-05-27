@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Employee, WorkSession } from './lib/supabase';
+import { supabase, Employee, WorkSession } from './lib/supabase';
 import LoginScreen from './components/LoginScreen';
 import PlanOfDay from './components/PlanOfDay';
 import MotivationScreen from './components/MotivationScreen';
@@ -40,9 +40,23 @@ export default function App() {
 
       // Listen for session-restored event pushed from main process
       eApi.onSessionRestored?.(async (cached: any) => {
-        if (cached?.employee && cached?.session && cached?.screen === 'timer') {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        if (cached?.employee && cached?.session && cached?.screen === 'timer' && cached.session.session_date === todayStr) {
+          
+          let latestSession = cached.session;
+          try {
+             // Fetch the most recent session seconds from DB in case they shut down abruptly
+             const { data } = await supabase.from('work_sessions').select('*').eq('id', cached.session.id).single();
+             if (data) {
+                 latestSession = data;
+                 eApi.saveSessionCache?.({ ...cached, session: latestSession, savedAt: new Date().toISOString() });
+             }
+          } catch (e) {
+             console.error('Failed to fetch latest session from DB', e);
+          }
+
           setEmployee(cached.employee);
-          setSession(cached.session);
+          setSession(latestSession);
           setPlanFlowCompleted(true);
           setPlanSubmitted(true);
           setSummarySubmitted(true);
@@ -57,20 +71,33 @@ export default function App() {
           
           // Restore counters in Electron activity monitor
           await eApi.initializeSessionCounters?.(
-            cached.session.active_seconds || 0,
-            cached.session.idle_seconds || 0,
-            cached.session.productive_seconds || 0,
-            (cached.session.active_seconds || 0) + (cached.session.idle_seconds || 0)
+            latestSession.active_seconds || 0,
+            latestSession.idle_seconds || 0,
+            latestSession.productive_seconds || 0,
+            (latestSession.active_seconds || 0) + (latestSession.idle_seconds || 0)
           );
           eApi.showFloatingTimer?.();
+          eApi.startTracking?.();
+        } else if (cached) {
+           eApi.clearSessionCache?.();
         }
       });
 
       // Also try loading via IPC directly
       const cached = await eApi.loadSessionCache?.();
-      if (cached?.employee && cached?.session && cached?.screen === 'timer') {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      if (cached?.employee && cached?.session && cached?.screen === 'timer' && cached.session.session_date === todayStr) {
+        let latestSession = cached.session;
+        try {
+           const { data } = await supabase.from('work_sessions').select('*').eq('id', cached.session.id).single();
+           if (data) {
+               latestSession = data;
+               eApi.saveSessionCache?.({ ...cached, session: latestSession, savedAt: new Date().toISOString() });
+           }
+        } catch (e) {}
+
         setEmployee(cached.employee);
-        setSession(cached.session);
+        setSession(latestSession);
         setPlanFlowCompleted(true);
         setPlanSubmitted(true);
         setSummarySubmitted(true);
@@ -86,12 +113,15 @@ export default function App() {
         
         // Restore counters in Electron activity monitor
         await eApi.initializeSessionCounters?.(
-          cached.session.active_seconds || 0,
-          cached.session.idle_seconds || 0,
-          cached.session.productive_seconds || 0,
-          (cached.session.active_seconds || 0) + (cached.session.idle_seconds || 0)
+          latestSession.active_seconds || 0,
+          latestSession.idle_seconds || 0,
+          latestSession.productive_seconds || 0,
+          (latestSession.active_seconds || 0) + (latestSession.idle_seconds || 0)
         );
         eApi.showFloatingTimer?.();
+        eApi.startTracking?.();
+      } else if (cached) {
+         eApi.clearSessionCache?.();
       }
     };
     tryRestore();
@@ -194,6 +224,7 @@ export default function App() {
       });
       // Show the floating live timer
       eApi.showFloatingTimer?.();
+      await eApi.startTracking?.();
     }
 
     setScreen('motivation');
@@ -217,6 +248,7 @@ export default function App() {
     const eApi = api();
     await eApi?.clearSessionCache?.();
     await eApi?.hideFloatingTimer?.();
+    await eApi?.stopTracking?.();
     await eApi?.initializeSessionCounters?.(0, 0, 0, 0); // Reset counters in Electron on logout
   };
 

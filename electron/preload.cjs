@@ -43,6 +43,8 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('activity-update', listener);
   },
   removeActivityUpdateListener: () => ipcRenderer.removeAllListeners('activity-update'),
+  startTracking: () => ipcRenderer.invoke('start-tracking'),
+  stopTracking: () => ipcRenderer.invoke('stop-tracking'),
 
   // Auto-launch
   setAutoLaunch: (enabled) => ipcRenderer.invoke('set-auto-launch', enabled),
@@ -56,6 +58,7 @@ const electronAPI = {
   saveSessionCache: (data) => ipcRenderer.invoke('save-session-cache', data),
   loadSessionCache: () => ipcRenderer.invoke('load-session-cache'),
   clearSessionCache: () => ipcRenderer.invoke('clear-session-cache'),
+  checkTimesheetDb: (employeeCode) => ipcRenderer.invoke('check-timesheet-db', employeeCode),
   onSessionRestored: (callback) => {
     ipcRenderer.on('session-restored', (_event, data) => callback(data));
   },

@@ -9,6 +9,8 @@ import { setupOfflineCache } from './offlineCache.js';
 import {
   setActivityMonitorWindow,
   startBackgroundMonitoring,
+  stopBackgroundMonitoring,
+  resetSessionCounters,
   showGlobalWaterReminder,
   setAutoLaunchEnabled,
   getAutoLaunchStatus,
@@ -48,7 +50,7 @@ const sessionCachePath = path.join(app.getPath('userData'), 'session-cache.json'
 function saveSessionCache(data: any) {
   try {
     fs.writeFileSync(sessionCachePath, JSON.stringify(data), 'utf8');
-  } catch {}
+  } catch { }
 }
 
 function loadSessionCache(): any {
@@ -56,14 +58,14 @@ function loadSessionCache(): any {
     if (fs.existsSync(sessionCachePath)) {
       return JSON.parse(fs.readFileSync(sessionCachePath, 'utf8'));
     }
-  } catch {}
+  } catch { }
   return null;
 }
 
 function clearSessionCache() {
   try {
     if (fs.existsSync(sessionCachePath)) fs.unlinkSync(sessionCachePath);
-  } catch {}
+  } catch { }
 }
 
 // Register with Windows startup via Registry (robust fallback)
@@ -73,29 +75,37 @@ function registerWindowsStartup() {
   // Clean up old startup keys to prevent opening old/incorrect versions
   try {
     execSync('reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "TimeStrap Agent" /f', { stdio: 'ignore' });
-  } catch {}
+  } catch { }
   try {
     execSync('reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "electron.app.Knockturn Agent" /f', { stdio: 'ignore' });
-  } catch {}
+  } catch { }
   try {
     execSync('reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "electron.app.Electron" /f', { stdio: 'ignore' });
-  } catch {}
+  } catch { }
   try {
     execSync('reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "TimeChampAgent" /f', { stdio: 'ignore' });
-  } catch {}
+  } catch { }
 
-  // Only register auto-launch if the app is packaged (production installer/portable run)
   if (app.isPackaged) {
+    // Production: use Electron's built-in login item (always visible, no --background)
     try {
-      // Primary: Electron's built-in login item
       app.setLoginItemSettings({
         openAtLogin: true,
         path: process.execPath,
-        args: ['--background'],
-        openAsHidden: true,
+        args: [],
+        openAsHidden: false,
       });
     } catch (err) {
       console.error('Failed to register startup via setLoginItemSettings:', err);
+    }
+  } else {
+    // Dev mode: use Windows Registry to auto-start the app on boot
+    try {
+      const regValue = `"${process.execPath}" "${path.resolve('.')}"`;
+      execSync(`reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "KnockturnAgent" /t REG_SZ /d "${regValue}" /f`, { stdio: 'ignore' });
+      console.log('[Startup] Registered dev auto-launch via Registry');
+    } catch (err) {
+      console.error('Failed to register dev startup via Registry:', err);
     }
   }
 }
@@ -133,7 +143,7 @@ async function resolveStartUrl() {
   return `file://${indexPath}`;
 }
 
-async function createWindow(showOnStart = true) {
+async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -161,20 +171,34 @@ async function createWindow(showOnStart = true) {
     mainWindow.webContents.openDevTools();
   }
 
-  // Start activity monitor immediately on creation
+  // Set the window reference for activity monitor (actual monitoring starts later via IPC)
   setActivityMonitorWindow(mainWindow);
-  startBackgroundMonitoring();
 
   mainWindow.once('ready-to-show', () => {
-    // Pass session cache to renderer so it can auto-restore
+    // Pass session cache to renderer so it can auto-restore —
+    // but only if the cached session is from today
     const cached = loadSessionCache();
-    if (cached) {
+    const today = new Date().toISOString().slice(0, 10);
+    if (cached && cached.session?.session_date === today) {
       mainWindow?.webContents.send('session-restored', cached);
+    } else if (cached) {
+      // Stale session from a different day — clear it so user starts fresh
+      console.log(`[Main] Stale session cache from ${cached.session?.session_date}, today is ${today}. Clearing.`);
+      clearSessionCache();
     }
 
-    if (showOnStart) {
-      mainWindow?.show();
-    }
+    // Always show and bring to front on startup (like TimeChamp)
+    mainWindow?.show();
+    mainWindow?.focus();
+    // Pop above everything briefly so the user sees the login/plan screen
+    mainWindow?.setAlwaysOnTop(true, 'screen-saver');
+    setTimeout(() => {
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.setAlwaysOnTop(false);
+        }
+      } catch { }
+    }, 2000);
   });
 
   mainWindow.on('closed', () => {
@@ -331,8 +355,7 @@ function stopFloatingTimerUpdates() {
 app.on('ready', async () => {
   if (!gotLock) return;
 
-  const showOnStart = !process.argv.includes('--background');
-  await createWindow(showOnStart);
+  await createWindow();
 
   // Create the floating timer window (hidden until session starts)
   createFloatingTimerWindow();
@@ -359,7 +382,7 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (mainWindow === null) {
-    createWindow(true);
+    createWindow();
   } else {
     mainWindow.show();
     mainWindow.focus();
@@ -429,7 +452,7 @@ ipcMain.handle('request-show-window', async () => {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.setAlwaysOnTop(false);
           }
-        } catch {}
+        } catch { }
       }, 500);
     }
     return true;
@@ -604,10 +627,69 @@ ipcMain.handle('clear-session-cache', async () => {
   try { clearSessionCache(); return true; } catch { return false; }
 });
 
+// Check external timesheet DB for plan submission
+ipcMain.handle('check-timesheet-db', async (_, employeeCode) => {
+  const pg = await import('pg' as any);
+  const Client = pg.default?.Client || pg.Client;
+  const client = new Client({ 
+    connectionString: 'postgresql://postgres.bmigbiajnhhknltuvrso:Durgadevi%4067@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres',
+    ssl: { rejectUnauthorized: false }
+  });
+  
+  try {
+    await client.connect();
+    
+    // First, get the employee's UUID from their timesheet DB
+    const empResult = await client.query('SELECT id FROM employees WHERE employee_code = $1', [employeeCode]);
+    if (empResult.rows.length === 0) {
+      await client.end();
+      return false; // Employee not found in timesheet DB
+    }
+    
+    const employeeId = empResult.rows[0].id;
+    const today = new Date().toISOString().slice(0, 10);
+    console.log(`[checkTimesheetDb] Checking plans for employeeId ${employeeId} on ${today}`);
+    
+    // Check if they have a daily_plan for today
+    const planResult = await client.query('SELECT id FROM daily_plans WHERE employee_id = $1 AND "date"::text = $2', [employeeId, today]);
+    
+    console.log(`[checkTimesheetDb] Found ${planResult.rows.length} plans`);
+    
+    await client.end();
+    return planResult.rows.length > 0;
+  } catch (error) {
+    console.error('[checkTimesheetDb] Error checking timesheet DB:', error);
+    try { await client.end(); } catch (e) {}
+    return false;
+  }
+});
+
+// ─── App quit ─────────────────────────────────────────────────────────────────
+
+// ─── Start / Stop tracking IPC (called by renderer after plan+punch) ──────────
+
+ipcMain.handle('start-tracking', async () => {
+  try {
+    startBackgroundMonitoring();
+    console.log('[Main] Tracking started via IPC');
+    return true;
+  } catch { return false; }
+});
+
+ipcMain.handle('stop-tracking', async () => {
+  try {
+    stopBackgroundMonitoring();
+    resetSessionCounters();
+    console.log('[Main] Tracking stopped via IPC');
+    return true;
+  } catch { return false; }
+});
+
 // ─── App quit ─────────────────────────────────────────────────────────────────
 
 app.on('before-quit', () => {
   isQuitting = true;
+  stopBackgroundMonitoring();
   stopFloatingTimerUpdates();
   stopLocalServer();
   stopScreenshotService();

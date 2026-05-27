@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Monitor, Clock, Zap, Coffee, Activity, LogOut, Droplets, Timer,
   Globe, Code2, FileSpreadsheet, Mail, MessageSquare, Terminal,
-  LayoutDashboard, Layers, ChevronDown, ChevronUp,
+  LayoutDashboard, Layers, ChevronDown, ChevronUp, Moon, XCircle, Play,
 } from 'lucide-react';
 import { Employee, WorkSession } from '../lib/supabase';
 import { useActivityMonitor, formatTime, ActivityState } from '../hooks/useActivityMonitor';
@@ -250,10 +250,12 @@ export default function TimerScreen({ employee, session, showWaterReminder, onDi
             </div>
 
             {/* Time breakdown */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-5 gap-3">
               <TimeCard label="Active" seconds={activity.activeSeconds} color="green" icon={<Zap className="w-5 h-5 text-emerald-500" />} />
               <TimeCard label="Idle" seconds={activity.idleSeconds} color="amber" icon={<Coffee className="w-5 h-5 text-amber-500" />} />
               <TimeCard label="Productive" seconds={activity.productiveSeconds} color="pink" icon={<Activity className="w-5 h-5 text-pink-500" />} />
+              <TimeCard label="Non-Productive" seconds={Math.max(0, activity.activeSeconds - activity.productiveSeconds)} color="rose" icon={<XCircle className="w-5 h-5 text-rose-500" />} />
+              <TimeCard label="Away" seconds={activity.awaySeconds} color="slate" icon={<Moon className="w-5 h-5 text-slate-400" />} />
             </div>
 
             {/* Productivity bar */}
@@ -371,18 +373,21 @@ export default function TimerScreen({ employee, session, showWaterReminder, onDi
           <div className="bg-white rounded-2xl shadow-sm border border-pink-100 p-5">
             <p className="text-xs uppercase tracking-widest text-gray-400 mb-3 font-semibold">Session Stats</p>
             <div className="space-y-3">
+              <StatRow label="Started Working" value={punchInTime} />
               <StatRow label="Total Session" value={formatTime(activity.sessionSeconds)} />
               <StatRow label="Active Time" value={formatTime(activity.activeSeconds)} />
               <StatRow label="Idle Time" value={formatTime(activity.idleSeconds)} />
+              <StatRow label="Non-Productive" value={formatTime(Math.max(0, activity.activeSeconds - activity.productiveSeconds))} />
+              <StatRow label="Away Time" value={formatTime(activity.awaySeconds)} />
               <StatRow label="Productive" value={`${productivityPct}%`} highlight />
             </div>
           </div>
 
           {/* Punch In */}
           <div className="bg-gradient-to-br from-pink-50 to-rose-50 rounded-2xl border border-pink-100 p-5">
-            <p className="text-xs uppercase tracking-widest text-gray-400 mb-2 font-semibold">Punch In</p>
+            <p className="text-xs uppercase tracking-widest text-gray-400 mb-2 font-semibold">Started Working</p>
             <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-pink-400" />
+              <Play className="w-4 h-4 text-emerald-500" />
               <span className="font-bold text-gray-700 text-sm">{punchInTime}</span>
             </div>
           </div>
@@ -459,6 +464,8 @@ function TimeCard({ label, seconds, color, icon }: { label: string; seconds: num
     green: 'border-emerald-100 bg-emerald-50/60',
     amber: 'border-amber-100 bg-amber-50/60',
     pink: 'border-pink-100 bg-pink-50/60',
+    rose: 'border-rose-100 bg-rose-50/60',
+    slate: 'border-slate-100 bg-slate-50/60',
   };
   return (
     <div className={`rounded-xl border p-3 ${colorMap[color]}`}>
