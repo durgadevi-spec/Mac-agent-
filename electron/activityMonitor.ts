@@ -84,6 +84,7 @@ let monitoringStarted = false;
 let mainProcessIdlePrompted = false;
 let isIdleModalActive = false;
 let lastInputTime = Date.now();
+let isRefreshInProgress = false;
 let currentLog: ActivityLog | null = null;
 let activityLogs: ActivityLog[] = [];
 
@@ -333,6 +334,14 @@ function getProductiveState(appName: string, isIdle: boolean, website?: string):
   return 'neutral'; // Fallback to neutral
 }
 
+// Promise with timeout to prevent hanging
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))
+  ]);
+}
+
 function sendStateUpdate() {
   if (currentActivityWindow?.webContents && !currentActivityWindow.webContents.isDestroyed()) {
     const stateToSend = isIdleModalActive ? { ...activityState, state: 'idle' as const } : activityState;
@@ -341,6 +350,10 @@ function sendStateUpdate() {
 }
 
 async function refreshActivity() {
+  // Prevent overlapping executions to avoid timer getting stuck
+  if (isRefreshInProgress) return;
+  isRefreshInProgress = true;
+
   try {
     // Midnight rollover: if the date changed, reset counters for the new day
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -360,10 +373,19 @@ async function refreshActivity() {
       }
       let active: any = null;
       try {
-        active = await activeWinModule.activeWindow();
+        // Add timeout of 800ms to prevent hanging
+        active = await withTimeout(
+          activeWinModule.activeWindow(),
+          800,
+          null
+        );
       } catch {
         if (typeof activeWinModule.activeWindowSync === 'function') {
-          active = activeWinModule.activeWindowSync();
+          try {
+            active = activeWinModule.activeWindowSync();
+          } catch {
+            active = null;
+          }
         }
       }
 
@@ -443,6 +465,8 @@ async function refreshActivity() {
     sendStateUpdate();
   } catch (error) {
     console.error('Error refreshing activity state:', error);
+  } finally {
+    isRefreshInProgress = false;
   }
 }
 
