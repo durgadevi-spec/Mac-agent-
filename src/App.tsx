@@ -361,16 +361,12 @@ export default function App() {
     return <AdminMonitoringScreen onLogout={handleLogout} />;
   }
 
-  if (screen === 'plan' && employee && session) {
+  if (screen === 'plan' && employee) {
     return (
       <PlanOfDay
         employee={employee}
-        session={session}
         onComplete={handlePlanComplete}
         windowLocked={windowLocked}
-        planSubmitted={planSubmitted}
-        summarySubmitted={summarySubmitted}
-        punchConfirmed={punchConfirmed}
         onPlanSubmitted={() => setPlanSubmitted(true)}
         onSummarySubmitted={() => setSummarySubmitted(true)}
         onPunchConfirmed={() => setPunchConfirmed(true)}
