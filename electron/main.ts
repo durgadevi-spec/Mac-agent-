@@ -4,6 +4,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import isDev from 'electron-is-dev';
+import dotenv from 'dotenv';
+
+// Load environment variables from .env.local
+dotenv.config({ path: path.join(process.cwd(), '.env.local') });
+
 import { setupAutoReconnect } from './autoReconnect.js';
 import { setupOfflineCache } from './offlineCache.js';
 import {
@@ -35,6 +40,7 @@ import {
   getRecentScreenshots,
   updateScreenshotSettings,
 } from './screenshotService.js';
+import { startDailyScheduler, stopDailyScheduler, triggerDailySummaryEmails } from './dailyScheduler.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -161,15 +167,61 @@ async function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      devTools: true,  // Enable DevTools
     },
   });
 
   const startUrl = await resolveStartUrl();
   await mainWindow.loadURL(startUrl);
 
-  if (isDev) {
-    mainWindow.webContents.openDevTools();
-  }
+  // Open DevTools when page finishes loading (more reliable)
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('[Main] Page loaded, attempting to open DevTools...');
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.openDevTools({ mode: 'detach' });
+        console.log('[Main] DevTools opened successfully');
+      }
+    } catch (err) {
+      console.error('[Main] Failed to open DevTools on page load:', err);
+    }
+  });
+
+  // Also try opening immediately with a delay as backup
+  setTimeout(() => {
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        console.log('[Main] Backup: Opening DevTools with delay...');
+        mainWindow.webContents.openDevTools({ mode: 'detach' });
+      }
+    } catch (err) {
+      console.error('[Main] Backup: Failed to open DevTools:', err);
+    }
+  }, 1000);
+
+  // Add keyboard shortcuts for DevTools (F12, Ctrl+Shift+I)
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    // F12 to toggle DevTools
+    if (input.key.toLowerCase() === 'f12') {
+      try {
+        mainWindow?.webContents.toggleDevTools();
+        console.log('[Main] F12: Toggling DevTools');
+        event.preventDefault();
+      } catch (err) {
+        console.error('[Main] Failed to toggle DevTools with F12:', err);
+      }
+    }
+    // Ctrl+Shift+I also toggles DevTools
+    if (input.control && input.shift && input.key.toLowerCase() === 'i') {
+      try {
+        mainWindow?.webContents.toggleDevTools();
+        console.log('[Main] Ctrl+Shift+I: Toggling DevTools');
+        event.preventDefault();
+      } catch (err) {
+        console.error('[Main] Failed to toggle DevTools with Ctrl+Shift+I:', err);
+      }
+    }
+  });
 
   // Set the window reference for activity monitor (actual monitoring starts later via IPC)
   setActivityMonitorWindow(mainWindow);
@@ -355,6 +407,10 @@ function stopFloatingTimerUpdates() {
 app.on('ready', async () => {
   if (!gotLock) return;
 
+  console.log('[App] Ready event fired');
+  console.log(`[App] isDev: ${isDev}, isPackaged: ${app.isPackaged}`);
+  console.log(`[App] App path: ${app.getAppPath()}`);
+
   await createWindow();
 
   // Create the floating timer window (hidden until session starts)
@@ -370,6 +426,9 @@ app.on('ready', async () => {
 
   // Start background screenshot service
   startScreenshotService();
+
+  // Start daily summary email scheduler
+  startDailyScheduler();
 
   if (mainWindow) {
     mainWindow.webContents.session.preconnect({ url: 'https://qdqypcwnrbdgqagfdeun.supabase.co' });
@@ -471,7 +530,14 @@ ipcMain.handle('initialize-session-counters', async (_, active: number, idle: nu
 });
 
 ipcMain.handle('get-recent-screenshots', async () => {
-  try { return getRecentScreenshots(); } catch { return []; }
+  try { 
+    const shots = getRecentScreenshots();
+    console.log('[IPC] get-recent-screenshots handler called - returning:', shots.length, 'screenshots');
+    return shots;
+  } catch (err) {
+    console.error('[IPC] Error in get-recent-screenshots:', err);
+    return [];
+  }
 });
 
 ipcMain.handle('start-screenshot-service', async () => {
@@ -519,6 +585,17 @@ ipcMain.handle('update-app-classifications', async (_, classifications: any[]) =
     return true;
   } catch (err) {
     console.error('Failed to update app classifications in Main:', err);
+    return false;
+  }
+});
+
+ipcMain.handle('finish-day', async () => {
+  try {
+    // Stop background activity monitoring
+    stopBackgroundMonitoring();
+    return true;
+  } catch (err) {
+    console.error('Failed to finish day:', err);
     return false;
   }
 });
@@ -664,6 +741,18 @@ ipcMain.handle('check-timesheet-db', async (_, employeeCode) => {
   }
 });
 
+// ─── Daily Summary Email IPC ──────────────────────────────────────────────────
+
+ipcMain.handle('trigger-daily-summary-emails', async () => {
+  try {
+    await triggerDailySummaryEmails();
+    return true;
+  } catch (err) {
+    console.error('[Main] Error triggering daily summary emails:', err);
+    return false;
+  }
+});
+
 // ─── App quit ─────────────────────────────────────────────────────────────────
 
 // ─── Start / Stop tracking IPC (called by renderer after plan+punch) ──────────
@@ -693,6 +782,7 @@ app.on('before-quit', () => {
   stopFloatingTimerUpdates();
   stopLocalServer();
   stopScreenshotService();
+  stopDailyScheduler();
 });
 
 export { mainWindow };

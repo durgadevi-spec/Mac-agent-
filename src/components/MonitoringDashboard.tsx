@@ -49,8 +49,51 @@ interface ActivityData {
   }>;
 }
 
+interface ScreenshotCardProps {
+  shot: {
+    timestamp: string;
+    url: string;
+    appName: string;
+  };
+}
+
+const ScreenshotCard: React.FC<ScreenshotCardProps> = ({ shot }) => {
+  const [imageError, setImageError] = useState(false);
+  const isValidUrl = shot.url && shot.url.length > 0;
+
+  return (
+    <div className="relative group overflow-hidden rounded-lg border border-slate-200 shadow-sm bg-slate-50">
+      {imageError || !isValidUrl ? (
+        <div className="w-full h-36 flex items-center justify-center bg-gray-200">
+          <div className="text-center">
+            <p className="text-xs text-gray-500">Failed to load</p>
+            <p className="text-xs text-gray-400 mt-1">{shot.appName}</p>
+          </div>
+        </div>
+      ) : (
+        <img
+          src={shot.url}
+          alt={shot.appName}
+          className="w-full h-36 object-cover"
+          onError={() => {
+            console.error(`Failed to load screenshot: ${shot.appName}`);
+            setImageError(true);
+          }}
+        />
+      )}
+      <div className="opacity-0 group-hover:opacity-100 absolute inset-0 bg-black bg-opacity-40 rounded flex items-end p-3 text-white text-xs">
+        <div>
+          <p className="font-semibold truncate">{shot.appName || 'Unknown'}</p>
+          <p className="text-gray-200">{shot.timestamp}</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const MonitoringDashboard: React.FC = () => {
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeOverview | null>(null);
+  const [initialSelectionDone, setInitialSelectionDone] = useState(false);
   const [employees, setEmployees] = useState<EmployeeOverview[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [sessions, setSessions] = useState<WorkSession[]>([]);
@@ -68,6 +111,7 @@ const MonitoringDashboard: React.FC = () => {
   });
 
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [selectedSession, setSelectedSession] = useState<WorkSession | null>(null);
 
   const [activeTab, setActiveTab] = useState<'activity' | 'applications' | 'screenshots' | 'alerts' | 'logs'>(
     'activity'
@@ -78,8 +122,24 @@ const MonitoringDashboard: React.FC = () => {
 
   const normalizeScreenshotUrl = (value: string) => {
     if (!value) return '';
-    return value.startsWith('data:image/') ? value : `data:image/jpeg;base64,${value}`;
+    
+    // If it already starts with data: scheme, use as-is
+    if (value.startsWith('data:image/')) {
+      return value;
+    }
+    
+    // If it looks like base64 (no spaces, mostly alphanumeric + /+=)
+    if (/^[A-Za-z0-9+/=]+$/.test(value)) {
+      return `data:image/jpeg;base64,${value}`;
+    }
+    
+    // Otherwise return empty (invalid format)
+    console.warn('Screenshot data format not recognized:', value.substring(0, 100));
+    return '';
   };
+
+  // Keep employee selection persistent across date changes
+  // No need to reset initialSelectionDone when date changes
 
   useEffect(() => {
     const loadDashboardData = async () => {
@@ -122,27 +182,61 @@ const MonitoringDashboard: React.FC = () => {
       setSessions(rawSessions);
       setActivityLogs(rawActivityLogs);
 
-      if (!selectedEmployee && updatedEmployees.length > 0) {
+      // Only auto-select first employee on initial load, not on every refresh
+      if (!initialSelectionDone && updatedEmployees.length > 0) {
         setSelectedEmployee(updatedEmployees[0]);
+        setInitialSelectionDone(true);
       }
     };
 
     loadDashboardData();
     const interval = setInterval(loadDashboardData, 30000);
     return () => clearInterval(interval);
-  }, [selectedDate]);
+  }, [selectedDate, initialSelectionDone]);
+
+  // Update selectedSession when employee or sessions change
+  useEffect(() => {
+    if (!selectedEmployee || sessions.length === 0) {
+      setSelectedSession(null);
+      return;
+    }
+
+    const employeeSessions = sessions.filter((session) => session.employee_id === selectedEmployee.id);
+    
+    if (employeeSessions.length === 0) {
+      setSelectedSession(null);
+      return;
+    }
+
+    // Get the earliest session by punch_in_time (first login of the day)
+    const firstSession = employeeSessions.reduce((earliest, current) => {
+      const earliestTime = earliest.punch_in_time ? new Date(earliest.punch_in_time).getTime() : Infinity;
+      const currentTime = current.punch_in_time ? new Date(current.punch_in_time).getTime() : Infinity;
+      
+      if (earliestTime === Infinity) return current;
+      if (currentTime === Infinity) return earliest;
+      
+      return currentTime < earliestTime ? current : earliest;
+    });
+
+    setSelectedSession(firstSession);
+  }, [selectedEmployee, sessions]);
 
   useEffect(() => {
     if (!selectedEmployee) return;
 
     let cancelled = false;
 
-    const selectedSession = sessions.find((session) => session.employee_id === selectedEmployee.id);
+    // Find ALL sessions for this employee on the selected date
+    const employeeSessions = sessions.filter((session) => session.employee_id === selectedEmployee.id);
     const selectedLogs = activityLogs.filter((log) => log.employee_id === selectedEmployee.id);
     const currentApp = selectedLogs.length > 0 ? selectedLogs[0].app_name : 'Unknown';
-    const productiveTime = selectedSession?.productive_seconds ?? 0;
-    const activeTime = selectedSession?.active_seconds ?? 0;
-    const idleTime = selectedSession?.idle_seconds ?? 0;
+    
+    // Aggregate totals from ALL sessions for this employee today
+    const productiveTime = employeeSessions.reduce((sum, s) => sum + (s.productive_seconds ?? 0), 0);
+    const activeTime = employeeSessions.reduce((sum, s) => sum + (s.active_seconds ?? 0), 0);
+    const idleTime = employeeSessions.reduce((sum, s) => sum + (s.idle_seconds ?? 0), 0);
+    
     const productivity = activeTime > 0 ? Math.round((productiveTime / activeTime) * 100) : 0;
     const sessionStartTime = selectedSession?.punch_in_time ?? new Date().toLocaleTimeString();
 
@@ -151,12 +245,23 @@ const MonitoringDashboard: React.FC = () => {
       setScreenshotError('');
       try {
         const dateString = format(selectedDate, 'yyyy-MM-dd');
+        console.log(`[Dashboard] Loading screenshots for employee ${selectedEmployee.id} on ${dateString}`);
         const remoteShots = await getEmployeeScreenshotsByDate(selectedEmployee.id, dateString);
-        const shots = remoteShots.map((s) => ({
-          captured_at: s.captured_at,
-          screenshot_data: normalizeScreenshotUrl(s.screenshot_data),
-          app_name: s.app_name,
-        }));
+        console.log(`[Dashboard] Fetched ${remoteShots.length} screenshots from Supabase`);
+        
+        const shots = remoteShots.map((s) => {
+          const normalized = normalizeScreenshotUrl(s.screenshot_data);
+          if (!normalized) {
+            console.warn(`[Dashboard] Failed to normalize screenshot data for ${s.app_name}, original length: ${s.screenshot_data?.length || 0}`);
+          }
+          return {
+            captured_at: s.captured_at,
+            screenshot_data: normalized,
+            app_name: s.app_name,
+          };
+        });
+        
+        console.log(`[Dashboard] Normalized ${shots.filter(s => s.screenshot_data).length} valid screenshots`);
 
         if (!cancelled) {
           setActivityData({
@@ -175,13 +280,43 @@ const MonitoringDashboard: React.FC = () => {
             })),
             activityLogs: selectedLogs
               .sort((a, b) => new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime())
-              .map((log) => ({
-                timestamp: new Date(log.logged_at).toLocaleTimeString(),
-                type: log.activity_type,
-                details: log.activity_type === 'idle_reason'
-                  ? (log.idle_reason || 'Idle reason provided')
-                  : `${log.app_name || 'Unknown'} • ${log.window_title || 'No title'}`,
-              })),
+              .map((log) => {
+                let details = '';
+                if (log.activity_type === 'idle_reason') {
+                  details = log.idle_reason || 'Idle reason provided';
+                } else {
+                  const appName = log.app_name || 'Unknown';
+                  const windowTitle = log.window_title || 'No title';
+                  const website = log.website || '';
+                  
+                  // For browsers, show website prominently if available
+                  if (appName.toLowerCase().includes('chrome') || appName.toLowerCase().includes('edge') || appName.toLowerCase().includes('firefox')) {
+                    if (website && website.trim()) {
+                      // Website is available - show it prominently
+                      details = `${appName} • ${website}`;
+                      // Only add title if it's not redundant
+                      if (windowTitle && !windowTitle.toLowerCase().includes(website.toLowerCase()) && windowTitle !== 'No title') {
+                        details += ` (${windowTitle})`;
+                      }
+                    } else {
+                      // No website data, show title
+                      details = `${appName} • ${windowTitle}`;
+                    }
+                  } else {
+                    // Non-browser apps
+                    if (website) {
+                      details = `${appName} • ${website} (${windowTitle})`;
+                    } else {
+                      details = `${appName} • ${windowTitle}`;
+                    }
+                  }
+                }
+                return {
+                  timestamp: new Date(log.logged_at).toLocaleTimeString(),
+                  type: log.activity_type,
+                  details,
+                };
+              }),
           });
         }
       } catch (error) {
@@ -200,13 +335,43 @@ const MonitoringDashboard: React.FC = () => {
             sessionStartTime,
             activityLogs: selectedLogs
               .sort((a, b) => new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime())
-              .map((log) => ({
-                timestamp: new Date(log.logged_at).toLocaleTimeString(),
-                type: log.activity_type,
-                details: log.activity_type === 'idle_reason'
-                  ? (log.idle_reason || 'Idle reason provided')
-                  : `${log.app_name || 'Unknown'} • ${log.window_title || 'No title'}`,
-              })),
+              .map((log) => {
+                let details = '';
+                if (log.activity_type === 'idle_reason') {
+                  details = log.idle_reason || 'Idle reason provided';
+                } else {
+                  const appName = log.app_name || 'Unknown';
+                  const windowTitle = log.window_title || 'No title';
+                  const website = log.website || '';
+                  
+                  // For browsers, show website prominently if available
+                  if (appName.toLowerCase().includes('chrome') || appName.toLowerCase().includes('edge') || appName.toLowerCase().includes('firefox')) {
+                    if (website && website.trim()) {
+                      // Website is available - show it prominently
+                      details = `${appName} • ${website}`;
+                      // Only add title if it's not redundant
+                      if (windowTitle && !windowTitle.toLowerCase().includes(website.toLowerCase()) && windowTitle !== 'No title') {
+                        details += ` (${windowTitle})`;
+                      }
+                    } else {
+                      // No website data, show title
+                      details = `${appName} • ${windowTitle}`;
+                    }
+                  } else {
+                    // Non-browser apps
+                    if (website) {
+                      details = `${appName} • ${website} (${windowTitle})`;
+                    } else {
+                      details = `${appName} • ${windowTitle}`;
+                    }
+                  }
+                }
+                return {
+                  timestamp: new Date(log.logged_at).toLocaleTimeString(),
+                  type: log.activity_type,
+                  details,
+                };
+              }),
           }));
         }
       } finally {
@@ -219,6 +384,7 @@ const MonitoringDashboard: React.FC = () => {
     loadScreenshots();
 
     if (selectedSession?.punch_in_time) {
+      // Calculate duration from FIRST login of the day (not current session)
       const start = new Date(selectedSession.punch_in_time).getTime();
       const diff = Date.now() - start;
       const hours = Math.floor(diff / 3600000);
@@ -229,7 +395,7 @@ const MonitoringDashboard: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedEmployee, sessions, activityLogs]);
+  }, [selectedEmployee, sessions, activityLogs, selectedSession, selectedDate]);
 
   const formatTime = (seconds: number) => {
     const hours = Math.floor(seconds / 3600);
@@ -408,40 +574,40 @@ const MonitoringDashboard: React.FC = () => {
                 </div>
 
                 {/* Time Metrics */}
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="bg-white rounded-lg shadow p-4">
-                    <p className="text-gray-600 text-sm font-semibold mb-2">Active Time</p>
-                    <p className="text-2xl font-bold text-blue-600">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <div className="bg-white rounded-lg shadow p-3">
+                    <p className="text-gray-600 text-xs font-semibold mb-1">Active Time</p>
+                    <p className="text-lg font-bold text-blue-600">
                       {formatTime(activityData.activeTime)}
                     </p>
                   </div>
-                  <div className="bg-white rounded-lg shadow p-4">
-                    <p className="text-gray-600 text-sm font-semibold mb-2">Productive</p>
-                    <p className="text-2xl font-bold text-green-600">
+                  <div className="bg-white rounded-lg shadow p-3">
+                    <p className="text-gray-600 text-xs font-semibold mb-1">Productive</p>
+                    <p className="text-lg font-bold text-green-600">
                       {formatTime(activityData.productiveTime)}
                     </p>
                   </div>
-                  <div className="bg-white rounded-lg shadow p-4">
-                    <p className="text-gray-600 text-sm font-semibold mb-2">Non-Productive</p>
-                    <p className="text-2xl font-bold text-red-600">
+                  <div className="bg-white rounded-lg shadow p-3">
+                    <p className="text-gray-600 text-xs font-semibold mb-1">Non-Productive</p>
+                    <p className="text-lg font-bold text-red-600">
                       {formatTime(activityData.nonproductiveTime)}
                     </p>
                   </div>
-                  <div className="bg-white rounded-lg shadow p-4">
-                    <p className="text-gray-600 text-sm font-semibold mb-2">Idle Time</p>
-                    <p className="text-2xl font-bold text-yellow-600">
+                  <div className="bg-white rounded-lg shadow p-3">
+                    <p className="text-gray-600 text-xs font-semibold mb-1">Idle Time</p>
+                    <p className="text-lg font-bold text-yellow-600">
                       {formatTime(activityData.idleTime)}
                     </p>
                   </div>
-                  <div className="bg-white rounded-lg shadow p-4">
-                    <p className="text-gray-600 text-sm font-semibold mb-2">Away Time</p>
-                    <p className="text-2xl font-bold text-orange-600">
+                  <div className="bg-white rounded-lg shadow p-3">
+                    <p className="text-gray-600 text-xs font-semibold mb-1">Away Time</p>
+                    <p className="text-lg font-bold text-orange-600">
                       {formatTime(activityData.awayTime)}
                     </p>
                   </div>
-                  <div className="bg-white rounded-lg shadow p-4">
-                    <p className="text-gray-600 text-sm font-semibold mb-2">Productivity</p>
-                    <p className="text-2xl font-bold text-indigo-600">
+                  <div className="bg-white rounded-lg shadow p-3">
+                    <p className="text-gray-600 text-xs font-semibold mb-1">Productivity</p>
+                    <p className="text-lg font-bold text-indigo-600">
                       {activityData.productivity}%
                     </p>
                   </div>
@@ -449,25 +615,29 @@ const MonitoringDashboard: React.FC = () => {
 
                 {/* Current Session */}
                 <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="font-bold text-lg mb-4 text-gray-900">Current Session</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <h3 className="font-bold text-lg mb-4 text-gray-900">Today's Activity Summary</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div>
-                      <p className="text-gray-600 text-sm">Login Time</p>
-                      <p className="font-semibold text-gray-900">{selectedEmployee.lastSync}</p>
+                      <p className="text-gray-600 text-xs font-semibold">First Login Time</p>
+                      <p className="font-semibold text-gray-900 text-sm mt-1">
+                        {selectedSession?.punch_in_time
+                          ? new Date(selectedSession.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                          : 'N/A'}
+                      </p>
                     </div>
                     <div>
-                      <p className="text-gray-600 text-sm">Total Duration</p>
-                      <p className="font-semibold text-gray-900">{sessionDuration}</p>
+                      <p className="text-gray-600 text-xs font-semibold">Total Active Time</p>
+                      <p className="font-semibold text-gray-900 text-sm mt-1">{formatTime(activityData.activeTime)}</p>
                     </div>
                     <div>
-                      <p className="text-gray-600 text-sm">Status</p>
-                      <p className="font-semibold text-green-600 capitalize">
+                      <p className="text-gray-600 text-xs font-semibold">Status</p>
+                      <p className="font-semibold text-green-600 text-sm mt-1 capitalize">
                         {selectedEmployee.status}
                       </p>
                     </div>
                     <div>
-                      <p className="text-gray-600 text-sm">Current App</p>
-                      <p className="font-semibold text-gray-900">{activityData.currentApp}</p>
+                      <p className="text-gray-600 text-xs font-semibold">Current App</p>
+                      <p className="font-semibold text-gray-900 text-sm mt-1">{activityData.currentApp}</p>
                     </div>
                   </div>
                 </div>
@@ -598,19 +768,7 @@ const MonitoringDashboard: React.FC = () => {
                         ) : activityData.screenshots.length > 0 ? (
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                             {activityData.screenshots.map((shot, idx) => (
-                              <div key={idx} className="relative group overflow-hidden rounded-lg border border-slate-200 shadow-sm bg-slate-50">
-                                <img
-                                  src={shot.url}
-                                  alt={shot.appName}
-                                  className="w-full h-36 object-cover"
-                                />
-                                <div className="opacity-0 group-hover:opacity-100 absolute inset-0 bg-black bg-opacity-40 rounded flex items-end p-3 text-white text-xs">
-                                  <div>
-                                    <p className="font-semibold truncate">{shot.appName || 'Unknown'}</p>
-                                    <p className="text-gray-200">{shot.timestamp}</p>
-                                  </div>
-                                </div>
-                              </div>
+                              <ScreenshotCard key={idx} shot={shot} />
                             ))}
                           </div>
                         ) : (

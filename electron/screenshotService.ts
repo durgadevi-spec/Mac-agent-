@@ -4,9 +4,23 @@ import path from 'path';
 import screenshot from 'screenshot-desktop';
 import { getCurrentActivity } from './activityMonitor.js';
 
+// Setup debug log file
+const debugLogPath = path.join(app.getPath('userData'), 'debug-screenshots.log');
+function debugLog(msg: string) {
+  const timestamp = new Date().toISOString();
+  const line = `[${timestamp}] ${msg}\n`;
+  console.log(msg);
+  try {
+    fs.appendFileSync(debugLogPath, line);
+  } catch (e) {
+    // ignore
+  }
+}
+
 let screenshotInterval: NodeJS.Timeout | null = null;
-let pendingScreenshots: Array<{ app_name: string; captured_at: string; screenshot_data: string }> = [];
+let pendingScreenshots: Array<{ app_name: string; captured_at: string; screenshot_data: string; id: string }> = [];
 let currentIntervalMinutes = 3; // Default 3 minutes from settings image
+let lastSyncedScreenshotId = ''; // Track which screenshots have been synced
 
 let shouldBlurScreenshots = false;
 
@@ -15,7 +29,7 @@ export function updateScreenshotSettings(intervalMinutes: number, blur?: boolean
     shouldBlurScreenshots = !!blur;
   }
   const newInterval = Math.max(1, intervalMinutes);
-  console.log(`[Screenshot] Settings updated: interval=${newInterval}m, blur=${shouldBlurScreenshots}`);
+  debugLog(`[Screenshot] Settings updated: interval=${newInterval}m, blur=${shouldBlurScreenshots}`);
 
   if (currentIntervalMinutes !== newInterval) {
     currentIntervalMinutes = newInterval;
@@ -29,18 +43,21 @@ export function updateScreenshotSettings(intervalMinutes: number, blur?: boolean
 export function startScreenshotService() {
   if (screenshotInterval) return;
 
+  debugLog('[Screenshot] Service starting...');
   const screenshotDir = path.join(app.getPath('userData'), 'screenshots');
   if (!fs.existsSync(screenshotDir)) {
     fs.mkdirSync(screenshotDir, { recursive: true });
+    debugLog('[Screenshot] Created screenshots directory: ' + screenshotDir);
   }
 
   const INTERVAL_MS = currentIntervalMinutes * 60 * 1000;
+  debugLog('[Screenshot] Interval set to: ' + currentIntervalMinutes + ' minutes (' + INTERVAL_MS + 'ms)');
 
   screenshotInterval = setInterval(async () => {
     try {
       const activity = getCurrentActivity();
       if (activity.isIdle || activity.state === 'away') {
-        console.log('[Screenshot] System is idle/away, skipping screenshot');
+        debugLog('[Screenshot] System is idle/away, skipping screenshot');
         return;
       }
 
@@ -70,19 +87,28 @@ export function startScreenshotService() {
 
       // Convert to base64 string
       const base64Data = finalBuffer.toString('base64');
+      const screenshotData = `data:image/jpeg;base64,${base64Data}`;
+
+      // Validate the data isn't too large (PostgreSQL text limit is very high, but browsers have limits)
+      if (screenshotData.length > 5242880) { // 5MB limit for safety
+        console.warn(`[Screenshot] Screenshot data too large (${Math.round(screenshotData.length / 1024 / 1024)} MB), skipping this screenshot`);
+        return;
+      }
 
       pendingScreenshots.push({
         app_name: activity.activeWindow.appName,
         captured_at: now.toISOString(),
-        screenshot_data: `data:image/jpeg;base64,${base64Data}`,
+        screenshot_data: screenshotData,
+        id: `${now.getTime()}_${Math.random().toString(36).substr(2, 9)}`,
       });
 
-      console.log(`[Screenshot] Screen captured & compressed (${Math.round(finalBuffer.length / 1024)} KB): ${filename} (app: ${activity.activeWindow.appName})`);
+      debugLog(`[Screenshot] Screen captured & compressed (${Math.round(finalBuffer.length / 1024)} KB, base64 size: ${Math.round(screenshotData.length / 1024)} KB): ${filename} (app: ${activity.activeWindow.appName})`);
+      debugLog(`[Screenshot] Total pending screenshots: ${pendingScreenshots.length}`);
 
       // Keep disk clean by pruning screenshots older than 2 days
       pruneOldScreenshots(screenshotDir);
     } catch (error) {
-      console.error('[Screenshot] Capture failed:', error);
+      debugLog('[Screenshot] Capture failed: ' + String(error));
     }
   }, INTERVAL_MS);
 
@@ -112,18 +138,32 @@ export function startScreenshotService() {
       fs.writeFileSync(filePath, finalBuffer);
 
       const base64Data = finalBuffer.toString('base64');
+      const screenshotData = `data:image/jpeg;base64,${base64Data}`;
+
+      // Validate the data isn't too large
+      if (screenshotData.length > 5242880) {
+        console.warn(`[Screenshot] Initial screenshot data too large (${Math.round(screenshotData.length / 1024 / 1024)} MB), skipping`);
+        return;
+      }
+
       pendingScreenshots.push({
         app_name: activity.activeWindow.appName,
         captured_at: now.toISOString(),
-        screenshot_data: `data:image/jpeg;base64,${base64Data}`,
+        screenshot_data: screenshotData,
+        id: `${now.getTime()}_init_${Math.random().toString(36).substr(2, 9)}`,
       });
-      console.log(`[Screenshot] Initial validation screen captured & compressed (${Math.round(finalBuffer.length / 1024)} KB): ${filename}`);
+      debugLog(`[Screenshot] Initial validation screen captured & compressed (${Math.round(finalBuffer.length / 1024)} KB, base64 size: ${Math.round(screenshotData.length / 1024)} KB): ${filename}`);
     } catch (error) {
-      console.error('[Screenshot] Initial capture failed:', error);
+      debugLog('[Screenshot] Initial capture failed: ' + String(error));
     }
   }, 5000);
 
-  console.log(`[Screenshot] Service started with interval: ${currentIntervalMinutes}m`);
+  debugLog(`[Screenshot] Service started with interval: ${currentIntervalMinutes}m`);
+  
+  // Cleanup old synced screenshots every 24 hours
+  setInterval(() => {
+    cleanupSyncedScreenshots();
+  }, 24 * 60 * 60 * 1000);
 }
 
 export function stopScreenshotService() {
@@ -131,13 +171,18 @@ export function stopScreenshotService() {
     clearInterval(screenshotInterval);
     screenshotInterval = null;
   }
-  console.log('[Screenshot] Service stopped');
+  debugLog('[Screenshot] Service stopped');
 }
 
 export function getRecentScreenshots() {
-  const copy = [...pendingScreenshots];
-  pendingScreenshots = []; // Clear queue on retrieval
-  return copy;
+  // Only return screenshots that haven't been synced yet
+  const unsynced = pendingScreenshots.filter(s => s.id > lastSyncedScreenshotId);
+  debugLog(`[Screenshot] getRecentScreenshots called - returning ${unsynced.length} unsync'd screenshots out of ${pendingScreenshots.length} total`);
+  if (unsynced.length > 0) {
+    debugLog(`[Screenshot] Screenshot details: ` + JSON.stringify(unsynced.map(s => ({ app: s.app_name, time: s.captured_at, dataSize: Math.round(s.screenshot_data.length / 1024) + 'KB' }))));
+    lastSyncedScreenshotId = unsynced[unsynced.length - 1].id;
+  }
+  return unsynced;
 }
 
 function pruneOldScreenshots(dir: string) {
@@ -153,6 +198,20 @@ function pruneOldScreenshots(dir: string) {
       }
     }
   } catch (err) {
-    console.error('[Screenshot] Error pruning screenshots:', err);
+    debugLog('[Screenshot] Error pruning screenshots: ' + String(err));
+  }
+}
+
+export function cleanupSyncedScreenshots() {
+  // Remove screenshots older than 2 days from memory
+  const now = Date.now();
+  const maxAgeMs = 2 * 24 * 60 * 60 * 1000; // 2 days
+  const before = pendingScreenshots.length;
+  pendingScreenshots = pendingScreenshots.filter(s => {
+    const capturedTime = new Date(s.captured_at).getTime();
+    return now - capturedTime < maxAgeMs;
+  });
+  if (pendingScreenshots.length < before) {
+    debugLog(`[Screenshot] Cleaned up ${before - pendingScreenshots.length} old screenshots from memory`);
   }
 }

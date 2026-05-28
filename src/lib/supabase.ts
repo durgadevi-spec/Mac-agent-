@@ -27,11 +27,14 @@ export interface WorkSession {
   session_date: string;
   punched_in: boolean;
   punch_in_time: string | null;
+  started_work_time: string | null;
   plan_submitted: boolean;
   plan_text: string;
   active_seconds: number;
   idle_seconds: number;
   productive_seconds: number;
+  day_finished?: boolean;
+  ended_work_time?: string | null;
   created_at: string;
 }
 
@@ -144,10 +147,33 @@ export async function getTodaySession(employeeId: string): Promise<WorkSession |
     }
 
     if (data) {
+      // If started_work_time is null, set it to created_at (original session creation time, not current time)
+      if (!data.started_work_time) {
+        const startTime = data.created_at; // Use session creation time, not now
+        console.log('[getTodaySession] Setting started_work_time for session', data.id, 'to', startTime, '(from created_at)');
+        const { data: updatedSession, error: updateError } = await supabase
+          .from('work_sessions')
+          .update({ started_work_time: startTime })
+          .eq('id', data.id)
+          .select()
+          .maybeSingle() as { data: WorkSession | null; error: PostgrestError | null };
+        
+        if (updateError) {
+          console.error('Error updating started_work_time:', updateError);
+          // Even if DB update fails, return with the updated time locally
+          console.log('[getTodaySession] Returning with local started_work_time:', startTime);
+          return { ...data, started_work_time: startTime };
+        }
+        console.log('[getTodaySession] DB update succeeded, returning updated session');
+        return updatedSession || { ...data, started_work_time: startTime };
+      }
+      console.log('[getTodaySession] Session already has started_work_time:', data.started_work_time);
       return data;
     }
 
     // Create new session if doesn't exist
+    // On FIRST login of the day, set started_work_time to NOW
+    const now = new Date().toISOString();
     const { data: newSession, error: insertError } = await supabase
       .from('work_sessions')
       .insert({
@@ -155,6 +181,7 @@ export async function getTodaySession(employeeId: string): Promise<WorkSession |
         session_date: today,
         punched_in: false,
         punch_in_time: null,
+        started_work_time: now,
         plan_submitted: false,
         plan_text: '',
         active_seconds: 0,
@@ -173,6 +200,7 @@ export async function getTodaySession(employeeId: string): Promise<WorkSession |
         session_date: today,
         punched_in: false,
         punch_in_time: null,
+        started_work_time: now,
         plan_submitted: false,
         plan_text: '',
         active_seconds: 0,
@@ -202,6 +230,22 @@ export async function updateSessionPlan(
 
   if (error) {
     console.error('Error updating session plan:', error);
+    return null;
+  }
+
+  return data;
+}
+
+export async function markPlanAsSubmitted(sessionId: string): Promise<WorkSession | null> {
+  const { data, error } = await supabase
+    .from('work_sessions')
+    .update({ plan_submitted: true })
+    .eq('id', sessionId)
+    .select()
+    .maybeSingle() as { data: WorkSession | null; error: PostgrestError | null };
+
+  if (error) {
+    console.error('Error marking plan as submitted:', error);
     return null;
   }
 
@@ -252,6 +296,26 @@ export async function syncSessionMetrics(
   return data;
 }
 
+export async function finishDay(sessionId: string): Promise<WorkSession | null> {
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('work_sessions')
+    .update({
+      day_finished: true,
+      ended_work_time: now,
+    })
+    .eq('id', sessionId)
+    .select()
+    .maybeSingle() as { data: WorkSession | null; error: PostgrestError | null };
+
+  if (error) {
+    console.error('Error finishing day:', error);
+    return null;
+  }
+
+  return data;
+}
+
 export async function fetchAllEmployees(): Promise<Employee[]> {
   const { data, error } = await supabase.from('employees').select('*') as {
     data: Employee[] | null;
@@ -283,11 +347,12 @@ export async function fetchRecentSessions(limit = 50): Promise<WorkSession[]> {
 }
 
 export async function fetchSessionsByDate(dateString: string): Promise<WorkSession[]> {
-  const { data, error } = await supabase
+  const { data, error } = (await supabase
     .from('work_sessions')
     .select('*')
     .eq('session_date', dateString)
-    .order('created_at', { ascending: false }) as {
+    .order('punch_in_time', { ascending: true })
+    .order('created_at', { ascending: false })) as {
       data: WorkSession[] | null;
       error: PostgrestError | null;
     };
@@ -395,7 +460,7 @@ export async function createActivityLog(entry: {
     session_id: entry.session_id,
     employee_id: entry.employee_id,
     app_name: entry.app_name,
-    title: entry.idle_reason ? `${entry.window_title} (Reason: ${entry.idle_reason})`.trim() : entry.window_title,
+    window_title: entry.idle_reason ? `${entry.window_title} (Reason: ${entry.idle_reason})`.trim() : entry.window_title,
     activity_type: entry.activity_type,
     logged_at: entry.logged_at,
     cpu_usage: entry.cpu_usage || 0,
@@ -423,6 +488,7 @@ export interface Screenshot {
   screenshot_data: string;
   captured_at: string;
   app_name: string;
+  url?: string;
 }
 
 export async function createScreenshot(entry: {
@@ -431,6 +497,7 @@ export async function createScreenshot(entry: {
   screenshot_data: string;
   app_name: string;
   captured_at?: string;
+  url?: string;
 }) {
   const payload = {
     employee_id: entry.employee_id,
@@ -438,6 +505,7 @@ export async function createScreenshot(entry: {
     screenshot_data: entry.screenshot_data,
     app_name: entry.app_name,
     captured_at: entry.captured_at || new Date().toISOString(),
+    url: entry.url || `${entry.app_name}-${entry.captured_at || new Date().toISOString()}`,
   };
 
   const { data, error } = await supabase.from('screenshots').insert([payload]) as {

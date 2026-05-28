@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Monitor, Clock, Zap, Coffee, Activity, LogOut, Droplets, Timer,
   Globe, Code2, FileSpreadsheet, Mail, MessageSquare, Terminal,
-  LayoutDashboard, Layers, ChevronDown, ChevronUp, Moon, XCircle, Play,
+  LayoutDashboard, Layers, ChevronDown, ChevronUp, Moon, XCircle, Play, PauseCircle,
 } from 'lucide-react';
-import { Employee, WorkSession } from '../lib/supabase';
+import { Employee, WorkSession, finishDay } from '../lib/supabase';
 import { useActivityMonitor, formatTime, ActivityState } from '../hooks/useActivityMonitor';
 import WaterReminderModal from './WaterReminderModal';
 import WindowControls from './WindowControls';
@@ -100,6 +100,12 @@ export default function TimerScreen({ employee, session, showWaterReminder, onDi
   const activity = useActivityMonitor(true);
   const logPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showConfirmLogout, setShowConfirmLogout] = useState(false);
+  const [showConfirmFinishDay, setShowConfirmFinishDay] = useState(false);
+  
+  // Debug log for session data
+  useEffect(() => {
+    console.log('[TimerScreen] Received session:', session.id, 'started_work_time:', session.started_work_time);
+  }, [session.id]);
   
   // Load monitoring settings on mount
   useEffect(() => {
@@ -120,6 +126,26 @@ export default function TimerScreen({ employee, session, showWaterReminder, onDi
   const [dateStr, setDateStr] = useState('');
   const [debugInfo, setDebugInfo] = useState({ logsCount: 0, activityState: 'away', lastUpdate: new Date().toLocaleTimeString() });
 
+  // Handle finish day
+  const handleFinishDay = async () => {
+    try {
+      // Call finishDay to update database
+      await finishDay(session.id);
+      
+      // Stop monitoring via Electron IPC
+      const api = (window as any).electronAPI;
+      if (api?.invoke) {
+        await api.invoke('finish-day');
+      }
+      
+      // Logout user after finishing day
+      onLogout();
+    } catch (err) {
+      console.error('Error finishing day:', err);
+      alert('Failed to finish day. Please try again.');
+    }
+  };
+
   // Live clock
   useEffect(() => {
     const tick = () => {
@@ -137,7 +163,7 @@ export default function TimerScreen({ employee, session, showWaterReminder, onDi
     const fetchScreenshots = async () => {
       try {
         const { getEmployeeScreenshots } = await import('../lib/supabase');
-        const data = await getEmployeeScreenshots(employee.id, 3);
+        const data = await getEmployeeScreenshots(employee.id, 12);
         if (Array.isArray(data)) {
           setRecentScreenshots(data);
         }
@@ -194,8 +220,9 @@ export default function TimerScreen({ employee, session, showWaterReminder, onDi
       ? Math.round((activity.productiveSeconds / activity.sessionSeconds) * 100)
       : 0;
 
-  const punchInTime = session.punch_in_time
-    ? new Date(session.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  // Use started_work_time (first login) rather than punch_in_time (punch confirmation)
+  const punchInTime = session.started_work_time
+    ? new Date(session.started_work_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : 'Not recorded';
 
   return (
@@ -218,6 +245,13 @@ export default function TimerScreen({ employee, session, showWaterReminder, onDi
             <p className="text-xs text-gray-400">{dateStr}</p>
           </div>
           <WindowControls />
+          <button
+            onClick={() => setShowConfirmFinishDay(true)}
+            className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-amber-500 transition border border-transparent hover:border-amber-200 rounded-lg px-3 py-1.5"
+          >
+            <PauseCircle className="w-4 h-4" />
+            <span className="hidden sm:inline">Pause</span>
+          </button>
           <button
             onClick={() => setShowConfirmLogout(true)}
             className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-rose-500 transition border border-transparent hover:border-rose-200 rounded-lg px-3 py-1.5"
@@ -393,12 +427,12 @@ export default function TimerScreen({ employee, session, showWaterReminder, onDi
           </div>
 
           {/* Recent Screenshots */}
-          <div className="bg-white rounded-2xl shadow-sm border border-pink-100 p-5">
+          <div className="bg-white rounded-2xl shadow-sm border border-pink-100 p-5 flex flex-col">
             <p className="text-xs uppercase tracking-widest text-gray-400 mb-3 font-semibold">Recent Screenshots</p>
             {recentScreenshots.length === 0 ? (
               <p className="text-xs text-gray-400 italic">No screenshots captured yet.</p>
             ) : (
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2 max-h-96 overflow-y-auto">
                 {recentScreenshots.map((scr, idx) => (
                   <div key={scr.id || idx} className="relative group cursor-pointer aspect-video rounded-lg overflow-hidden border border-pink-100 bg-gray-50 shadow-sm">
                     <img
@@ -449,6 +483,30 @@ export default function TimerScreen({ employee, session, showWaterReminder, onDi
                 onClick={onLogout}
                 className="flex-1 bg-gradient-to-r from-pink-500 to-rose-500 text-white font-semibold py-2.5 rounded-xl shadow transition hover:from-pink-600 hover:to-rose-600"
               >Sign Out</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showConfirmFinishDay && (
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-amber-100 p-6 max-w-sm w-full text-center">
+            <div className="flex justify-center mb-3">
+              <PauseCircle className="w-8 h-8 text-amber-500" />
+            </div>
+            <h3 className="font-bold text-gray-800 text-lg mb-2">Finish the Day?</h3>
+            <p className="text-gray-500 text-sm mb-5">
+              This will stop tracking your activity and end your work session. You won't be able to resume today. Are you sure?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowConfirmFinishDay(false)}
+                className="flex-1 border border-amber-200 text-amber-600 hover:bg-amber-50 font-semibold py-2.5 rounded-xl transition"
+              >Cancel</button>
+              <button
+                onClick={handleFinishDay}
+                className="flex-1 bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold py-2.5 rounded-xl shadow transition hover:from-amber-600 hover:to-orange-600"
+              >Finish Day</button>
             </div>
           </div>
         </div>

@@ -358,7 +358,7 @@ async function refreshActivity() {
     // Midnight rollover: if the date changed, reset counters for the new day
     const todayStr = new Date().toISOString().slice(0, 10);
     if (todayStr !== currentTrackingDate) {
-      console.log(`[Monitor] Day changed from ${currentTrackingDate} to ${todayStr} â€” resetting counters`);
+      console.log(`[Monitor] Day changed from ${currentTrackingDate} to ${todayStr} GÇö resetting counters`);
       resetSessionCounters();
       currentTrackingDate = todayStr;
     }
@@ -470,7 +470,7 @@ async function refreshActivity() {
   }
 }
 
-// â”€â”€ Exported helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// GöÇGöÇ Exported helpers GöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇ
 
 export function setActivityMonitorWindow(window: BrowserWindow) {
   currentActivityWindow = window;
@@ -549,13 +549,13 @@ export function showGlobalWaterReminder() {
     if (Notification.isSupported()) {
       new Notification({
         title: 'Hydration Reminder',
-        body: 'Please drink some water ğŸ’§. Stay hydrated and stay productive.',
+        body: 'Please drink some water =ƒÆº. Stay hydrated and stay productive.',
       }).show();
     }
   } catch {}
 
   try {
-    createReminderWindow('Please drink some water ğŸ’§');
+    createReminderWindow('Please drink some water =ƒÆº');
   } catch {}
 }
 
@@ -574,7 +574,7 @@ function createReminderWindow(message: string) {
     .title{font-size:20px;font-weight:700;color:#111827}
     .msg{color:#4b5563;margin-top:12px;line-height:1.5}
     .btn{margin-top:18px;padding:12px 16px;border:none;border-radius:12px;background:#2563eb;color:#fff;cursor:pointer;font-size:14px}
-    </style></head><body><div class="card"><div><div class="title">Please drink some water ğŸ’§</div>
+    </style></head><body><div class="card"><div><div class="title">Please drink some water =ƒÆº</div>
     <div class="msg">Stay hydrated to keep your productivity up. Take a quick break!</div></div>
     <button class="btn" onclick="window.close()">OK</button></div></body></html>`);
   win.loadURL(`data:text/html;charset=UTF-8,${html}`);

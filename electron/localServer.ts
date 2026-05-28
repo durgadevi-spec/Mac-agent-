@@ -88,11 +88,13 @@ export function startLocalServer() {
         try {
           const data = JSON.parse(body);
           if (data.url && data.title !== undefined) {
+            console.log(`[LocalServer] 🌐 Browser event received: URL=${data.url.substring(0, 60)} Title=${(data.title || 'N/A').substring(0, 50)}`);
             updateBrowserUrl(data.url, data.title);
           }
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true }));
         } catch (err) {
+          console.error('[LocalServer] Error parsing browser event:', err);
           res.writeHead(400);
           res.end();
         }

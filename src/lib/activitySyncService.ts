@@ -92,6 +92,7 @@ class ActivitySyncService {
 
     try {
       const api = (window as any).electronAPI;
+      console.log('[Sync] electronAPI available:', !!api);
 
       // Sync monitoring settings and classifications to Electron dynamically
       if (api) {
@@ -124,9 +125,18 @@ class ActivitySyncService {
       if (api?.getRecentScreenshots) {
         try {
           localScreenshots = await api.getRecentScreenshots();
+          if (localScreenshots.length > 0) {
+            console.log(`[Sync] Fetched ${localScreenshots.length} screenshots from Electron:`, localScreenshots.map(s => ({
+              app: s.app_name,
+              size: s.screenshot_data ? Math.round(s.screenshot_data.length / 1024) : 0,
+              hasData: !!s.screenshot_data
+            })));
+          }
         } catch (err) {
           console.error('Failed to get screenshots from Electron:', err);
         }
+      } else {
+        console.warn('[Sync] api.getRecentScreenshots not available');
       }
 
       // Use actual time metrics tracked by Electron
@@ -168,9 +178,13 @@ class ActivitySyncService {
         online_status: systemActivity.state === 'idle' ? 'idle' : systemActivity.state === 'away' ? 'away' : 'online',
       };
 
+      console.log('[Sync] Constructed activityData with', activityData.screenshots.length, 'screenshots');
+
       // Cache locally
       await this.cacheActivityData(activityData);
+      console.log('[Sync] Activity data cached');
       await this.sendToSupabase(activityData);
+      console.log('[Sync] Activity data sent to Supabase');
     } catch (error) {
       console.error('Error syncing activity data:', error);
     } finally {
@@ -183,10 +197,12 @@ class ActivitySyncService {
     try {
       const session = await getTodaySession(data.employee_id);
       sessionId = session?.id ?? null;
-      if (sessionId) {
+      
+      // Only sync metrics if we have a valid session (not a fallback local one)
+      if (sessionId && !sessionId.startsWith('session-')) {
         await syncSessionMetrics(sessionId, data.active_time, data.idle_time, data.productive_time);
       } else {
-        console.warn('No today session found for activity sync', data.employee_id);
+        console.warn('[Sync] Skipping session metrics - no valid database session', sessionId);
       }
     } catch (error) {
       console.error('Error updating session metrics:', error);
@@ -217,15 +233,30 @@ class ActivitySyncService {
     }
 
     // Upload screenshots to screenshots table
+    console.log('[Sync] Starting screenshot upload - total screenshots:', data.screenshots.length);
     try {
+      if (data.screenshots.length === 0) {
+        console.log('[Sync] No screenshots to upload');
+      }
       for (const scr of data.screenshots) {
-        await createScreenshot({
-          employee_id: data.employee_id,
-          session_id: sessionId,
-          screenshot_data: scr.screenshot_data,
-          app_name: scr.app_name,
-          captured_at: scr.captured_at,
-        });
+        try {
+          console.log(`[Sync] Uploading screenshot: app=${scr.app_name}, time=${scr.captured_at}, dataSize=${scr.screenshot_data ? Math.round(scr.screenshot_data.length / 1024) + 'KB' : 'missing'}`);
+          const result = await createScreenshot({
+            employee_id: data.employee_id,
+            session_id: sessionId,
+            screenshot_data: scr.screenshot_data,
+            app_name: scr.app_name,
+            captured_at: scr.captured_at,
+            url: scr.url || `screenshot-${scr.app_name}-${scr.captured_at}`,
+          });
+          if (result) {
+            console.log(`[Sync] ✓ Screenshot uploaded for ${scr.app_name} (${scr.captured_at})`);
+          } else {
+            console.warn(`[Sync] ✗ Failed to upload screenshot for ${scr.app_name}`);
+          }
+        } catch (error) {
+          console.error(`[Sync] Error uploading screenshot for ${scr.app_name}:`, error);
+        }
       }
     } catch (error) {
       console.error('Error writing screenshots to Supabase:', error);
@@ -241,7 +272,14 @@ class ActivitySyncService {
         log => log.duration_seconds > 0 && log.timestamp > lastSyncedLogTime
       );
 
+      console.log(`[Sync] Processing ${newLogs.length} new activity logs for upload`);
+      
       for (const log of newLogs) {
+        // Log website information when available for Chrome
+        if (log.app_name && (log.app_name.toLowerCase().includes('chrome') || log.app_name.toLowerCase().includes('edge') || log.app_name.toLowerCase().includes('firefox'))) {
+          console.log(`[Sync] 🌐 Browser Activity: ${log.app_name} | Website: ${log.website || '(no website)'} | Title: ${log.window_title}`);
+        }
+        
         await createActivityLog({
           session_id: sessionId,
           employee_id: data.employee_id,

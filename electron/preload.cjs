@@ -69,6 +69,9 @@ const electronAPI = {
   stopScreenshotService: () => ipcRenderer.invoke('stop-screenshot-service'),
   updateMonitoringSettings: (settings) => ipcRenderer.invoke('update-monitoring-settings', settings),
   updateAppClassifications: (classifications) => ipcRenderer.invoke('update-app-classifications', classifications),
+
+  // Email & Scheduler
+  triggerDailySummaryEmails: () => ipcRenderer.invoke('trigger-daily-summary-emails'),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

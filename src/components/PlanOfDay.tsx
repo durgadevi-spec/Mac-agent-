@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ClipboardList, ExternalLink } from 'lucide-react';
-import { Employee, WorkSession, getTodaySession, punchInSession } from '../lib/supabase';
+import { ArrowLeft, ClipboardList, ExternalLink, Lock } from 'lucide-react';
+import { Employee, WorkSession, getTodaySession, punchInSession, markPlanAsSubmitted } from '../lib/supabase';
 import WindowControls from './WindowControls';
 
 type PlanPhase = 'form' | 'summary' | 'punch' | 'punch_no';
@@ -52,40 +52,80 @@ export default function PlanOfDay({
   const handleConfirmationYes = async () => {
     setSummaryError('');
     setLoading(true);
+    console.log('[PlanOfDay] Starting plan verification for employee:', employee.employee_code);
 
     try {
-      const todaySession = await getTodaySession(employee.id);
+      // ─── Step 1: Check local database (with retry for sync delay) ────────────
+      let todaySession = await getTodaySession(employee.id);
+      console.log('[PlanOfDay] Initial session fetch - plan_submitted:', todaySession?.plan_submitted);
 
       if (todaySession && todaySession.plan_submitted) {
+        console.log('✓ Plan submission verified in local database');
         onSummarySubmitted?.();
-        console.log('✓ Plan submission verified');
         setPhase('punch');
         return;
       }
 
-      // Fallback: check the remote timesheet DB before rejecting
-      let externallySubmitted = false;
-      try {
-        console.log('[PlanOfDay] Checking electronAPI:', !!(window as any).electronAPI?.checkTimesheetDb);
-        if (typeof window !== 'undefined' && (window as any).electronAPI?.checkTimesheetDb) {
-          externallySubmitted = await (window as any).electronAPI.checkTimesheetDb(employee.employee_code);
-          console.log('[PlanOfDay] externallySubmitted result:', externallySubmitted);
-        }
-      } catch (e) {
-        console.error('[PlanOfDay] Failed to check remote timesheet DB', e);
+      // ─── Step 2: Retry database check with delay (sync might be pending) ─────
+      console.log('[PlanOfDay] Local DB check failed, waiting 2 seconds for sync...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      todaySession = await getTodaySession(employee.id);
+      console.log('[PlanOfDay] Retry after delay - plan_submitted:', todaySession?.plan_submitted);
+
+      if (todaySession && todaySession.plan_submitted) {
+        console.log('✓ Plan submission verified in local database (after retry)');
+        onSummarySubmitted?.();
+        setPhase('punch');
+        return;
       }
 
-      if (externallySubmitted) {
+      // ─── Step 3: Check remote timesheet DB ────────────────────────────────────
+      console.log('[PlanOfDay] Checking remote timesheet DB for code:', employee.employee_code);
+      let externallySubmitted = false;
+      try {
+        if (typeof window !== 'undefined' && (window as any).electronAPI?.checkTimesheetDb) {
+          externallySubmitted = await (window as any).electronAPI.checkTimesheetDb(employee.employee_code);
+          console.log('[PlanOfDay] Remote DB check result:', externallySubmitted);
+        } else {
+          console.warn('[PlanOfDay] checkTimesheetDb API not available');
+        }
+      } catch (e) {
+        console.error('[PlanOfDay] Failed to check remote timesheet DB:', e);
+      }
+
+      if (externallySubmitted && todaySession) {
+        // ─── Sync remote verification to local database ─────────────────────
+        try {
+          console.log('[PlanOfDay] Syncing plan submission to local database...');
+          await markPlanAsSubmitted(todaySession.id);
+          console.log('✓ Plan submission synced to local database');
+        } catch (syncError) {
+          console.error('[PlanOfDay] Failed to sync plan submission (continuing anyway):', syncError);
+        }
+        
         onSummarySubmitted?.();
         console.log('✓ Plan submission verified via remote DB');
         setPhase('punch');
         return;
       }
 
-      setSummaryError('The plan was not found as submitted in the database. Please submit the plan in the portal first and then try again.');
+      // ─── Step 4: Show error with debugging info ──────────────────────────────
+      const debugInfo = {
+        local_db_plan_submitted: todaySession?.plan_submitted,
+        remote_db_submitted: externallySubmitted,
+        session_id: todaySession?.id,
+        employee_code: employee.employee_code,
+      };
+      console.error('[PlanOfDay] Plan verification failed:', debugInfo);
+
+      setSummaryError(
+        `Plan verification failed. Local DB: ${todaySession?.plan_submitted ? 'Yes' : 'No'}, Remote DB: ${externallySubmitted ? 'Yes' : 'No'}. ` +
+        `Please ensure your plan was submitted in the portal and try again. If the issue persists, contact support.`
+      );
     } catch (error) {
-      console.error('Error verifying plan submission:', error);
-      setSummaryError('Unable to verify plan submission right now. Please try again.');
+      console.error('[PlanOfDay] Exception during plan verification:', error);
+      setSummaryError('An error occurred while verifying your plan. Please try again or contact support if the issue persists.');
     } finally {
       setLoading(false);
     }
@@ -120,8 +160,16 @@ export default function PlanOfDay({
           return;
         }
         
-        // If it was submitted externally, we should ideally mark it true locally
-        // so we don't have to check again, but allowing punch in is the main goal.
+        // Sync the plan submission to local database
+        if (todaySession) {
+          try {
+            await markPlanAsSubmitted(todaySession.id);
+            console.log('✓ Synced plan submission to local database');
+          } catch (syncError) {
+            console.error('[PlanOfDay] Failed to sync plan submission:', syncError);
+            // Continue anyway - external verification is sufficient
+          }
+        }
       }
 
       if (!todaySession) {
@@ -190,25 +238,47 @@ export default function PlanOfDay({
             {summaryError && (
               <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-4">{summaryError}</div>
             )}
+            {summaryError && (
+              <div className="bg-red-50 border-2 border-red-300 rounded-xl px-4 py-3 mb-4">
+                <p className="text-sm text-red-700 font-semibold mb-2">⚠️ Plan verification failed</p>
+                <p className="text-xs text-red-600 mb-3 leading-relaxed">{summaryError}</p>
+                <p className="text-xs text-red-500 italic">Please ensure your plan was submitted in the portal and try again.</p>
+              </div>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">
               <button
                 type="button"
                 onClick={handleConfirmationYes}
                 disabled={loading}
-                className="w-full bg-gradient-to-r from-pink-500 to-rose-500 text-white font-semibold py-3 rounded-xl shadow hover:from-pink-600 hover:to-rose-600 transition disabled:opacity-60"
+                className="w-full bg-gradient-to-r from-pink-500 to-rose-500 text-white font-semibold py-3 rounded-xl shadow hover:from-pink-600 hover:to-rose-600 transition disabled:opacity-60 flex items-center justify-center gap-2"
               >
-                {loading ? 'Checking...' : 'Yes, verify and continue'}
+                {loading ? (
+                  <>
+                    <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                    Verifying...
+                  </>
+                ) : (
+                  'Yes, verify and continue'
+                )}
               </button>
               <button
                 type="button"
                 onClick={handleConfirmationNo}
-                className="w-full border border-pink-200 text-pink-600 font-semibold py-3 rounded-xl hover:bg-pink-50 transition"
+                disabled={loading}
+                className="w-full border border-pink-200 text-pink-600 font-semibold py-3 rounded-xl hover:bg-pink-50 transition disabled:opacity-60"
               >
                 No, go back to portal
               </button>
             </div>
           </div>
         </div>
+
+        {/* Locked mode indicator during summary phase */}
+        {windowLocked && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 text-xs text-gray-500 bg-red-50 px-4 py-2 rounded-lg border border-red-200 max-w-sm text-center">
+            🔒 <strong>Focused Mode Active:</strong> Other applications are locked. Verify your plan to proceed.
+          </div>
+        )}
       </div>
     );
   }
@@ -374,6 +444,13 @@ export default function PlanOfDay({
           </div>
         </div>
       </div>
+
+      {/* Locked mode indicator during form and summary phases */}
+      {windowLocked && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 text-xs text-gray-500 bg-red-50 px-4 py-2 rounded-lg border border-red-200 max-w-sm text-center">
+          🔒 <strong>Focused Mode Active:</strong> Other applications are locked. Complete your plan submission to proceed.
+        </div>
+      )}
     </div>
   );
 }

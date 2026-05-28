@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { LogIn, User, Hash, Lock, Loader2 } from 'lucide-react';
 import { Employee, WorkSession, loginEmployee, getTodaySession } from '../lib/supabase';
+import WindowControls from './WindowControls';
 
 interface LoginScreenProps {
   onLogin: (employee: Employee, session: WorkSession) => void;
@@ -12,8 +13,25 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  // Load saved credentials on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('knockturn_login');
+      if (saved) {
+        const { code, name, password: pwd } = JSON.parse(saved);
+        setEmployeeCode(code);
+        setEmployeeName(name);
+        setPassword(pwd);
+        setRememberMe(true);
+      }
+    } catch (err) {
+      console.error('Failed to load saved credentials:', err);
+    }
+  }, []);
+
+  const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     if (!employeeCode.trim() || !password.trim()) {
@@ -49,7 +67,37 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
         return;
       }
 
+      console.log('[Login] Session created/fetched:', session.id, 'started_work_time:', session.started_work_time);
+
+      // Check if the day has already been finished
+      if (session.day_finished) {
+        console.warn('[Login] Day already finished for this employee');
+        setError('Your work day has already been finished. You cannot resume. Please contact your administrator if you need to continue working.');
+        return;
+      }
+
       console.log('[Login] Session created/fetched:', session.id);
+      
+      // Save credentials if "Remember Me" is checked
+      if (rememberMe) {
+        try {
+          localStorage.setItem('knockturn_login', JSON.stringify({
+            code: employeeCode,
+            name: employeeName,
+            password: password
+          }));
+        } catch (err) {
+          console.error('Failed to save credentials:', err);
+        }
+      } else {
+        // Clear saved credentials if not checked
+        try {
+          localStorage.removeItem('knockturn_login');
+        } catch (err) {
+          console.error('Failed to clear credentials:', err);
+        }
+      }
+      
       onLogin(employee, session);
     } catch (err) {
       console.error('[Login] Exception:', err);
@@ -129,6 +177,20 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
               </div>
             </div>
 
+            {/* Remember Me */}
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="remember-me"
+                checked={rememberMe}
+                onChange={e => setRememberMe(e.target.checked)}
+                className="w-4 h-4 rounded border-pink-200 text-pink-500 focus:ring-pink-200 cursor-pointer"
+              />
+              <label htmlFor="remember-me" className="text-sm text-gray-600 cursor-pointer">
+                Remember me on this device
+              </label>
+            </div>
+
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl px-4 py-3 text-sm">
                 {error}
@@ -154,6 +216,20 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
         <p className="text-center text-xs text-gray-400 mt-6">
           &copy; {new Date().getFullYear()} Knockturn &mdash; Internal Employee Agent
         </p>
+      </div>
+
+      {/* Window controls - locked during login (must sign in before closing) */}
+      <div className="fixed top-4 right-4 flex flex-col items-end gap-2">
+        <div className="text-xs font-semibold text-red-600 bg-red-50 px-3 py-1.5 rounded-full border border-red-200 flex items-center gap-1 whitespace-nowrap">
+          <Lock className="w-3 h-3" />
+          Focused Mode - Must Sign In
+        </div>
+        <WindowControls disabledClose={true} disabledMinimize={true} />
+      </div>
+
+      {/* Locked mode overlay message at bottom */}
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 text-xs text-gray-500 bg-gray-50 px-4 py-2 rounded-lg border border-gray-200 max-w-sm text-center">
+        🔒 <strong>Focused Mode Active:</strong> Please sign in to proceed with your work day. Other applications are temporarily locked.
       </div>
     </div>
   );

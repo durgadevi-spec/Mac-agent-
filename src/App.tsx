@@ -18,7 +18,7 @@ export default function App() {
   const [session, setSession] = useState<WorkSession | null>(null);
   const [planFlowCompleted, setPlanFlowCompleted] = useState(false);
   const [showWaterReminder, setShowWaterReminder] = useState(false);
-  const [windowLocked, setWindowLocked] = useState(false);
+  const [windowLocked, setWindowLocked] = useState(true); // Start locked at login
   const [planSubmitted, setPlanSubmitted] = useState(false);
   const [summarySubmitted, setSummarySubmitted] = useState(false);
   const [punchConfirmed, setPunchConfirmed] = useState(false);
@@ -26,7 +26,25 @@ export default function App() {
 
   const api = () => (window as any).electronAPI;
 
+  // ── Lock window at startup (before login) ─────────────────────────────────
   useEffect(() => {
+    const lockWindowAtStartup = async () => {
+      try {
+        const eApi = api();
+        if (eApi) {
+          // Lock window AND enable kiosk mode (prevents Alt+Tab, minimizing, switching apps)
+          await eApi.setWindowClosable?.(false);
+          await eApi.setWindowMinimizable?.(false);
+          await eApi.enterKiosk?.();
+          console.log('[App] Window locked at startup + kiosk mode enabled - awaiting login');
+        }
+      } catch (err) {
+        console.error('[App] Failed to lock window at startup:', err);
+      }
+    };
+
+    lockWindowAtStartup();
+
     if (window.location.hash.startsWith('#/idle-prompt')) {
       setScreen('idle-prompt');
     }
@@ -53,6 +71,37 @@ export default function App() {
              }
           } catch (e) {
              console.error('Failed to fetch latest session from DB', e);
+          }
+
+          // If started_work_time is missing, set it to session creation time (not current time)
+          if (!latestSession.started_work_time) {
+            const startTime = latestSession.created_at; // Use original session creation time
+            console.log('[SessionRestore] Setting started_work_time to', startTime, '(from created_at)');
+            try {
+              const { data: updated, error } = await supabase
+                .from('work_sessions')
+                .update({ started_work_time: startTime })
+                .eq('id', latestSession.id)
+                .select()
+                .single();
+              if (error) {
+                console.error('[SessionRestore] Error updating started_work_time:', error);
+                // Use local value even if DB update fails
+                latestSession = { ...latestSession, started_work_time: startTime };
+              } else if (updated) {
+                latestSession = updated;
+              }
+            } catch (err) {
+              console.error('[SessionRestore] Exception updating started_work_time:', err);
+              latestSession = { ...latestSession, started_work_time: startTime };
+            }
+          }
+
+          // Check if day has been finished - don't restore if it has
+          if (latestSession.day_finished) {
+            console.warn('[SessionRestore] Day already finished, clearing cache');
+            eApi.clearSessionCache?.();
+            return;
           }
 
           setEmployee(cached.employee);
@@ -96,6 +145,36 @@ export default function App() {
            }
         } catch (e) {}
 
+        // If started_work_time is missing, set it to session creation time (not current time)
+        if (!latestSession.started_work_time) {
+          const startTime = latestSession.created_at; // Use original session creation time
+          console.log('[SessionRestore] Setting started_work_time to', startTime, '(from created_at)');
+          try {
+            const { data: updated, error } = await supabase
+              .from('work_sessions')
+              .update({ started_work_time: startTime })
+              .eq('id', latestSession.id)
+              .select()
+              .single();
+            if (error) {
+              console.error('[SessionRestore] Error updating started_work_time:', error);
+              latestSession = { ...latestSession, started_work_time: startTime };
+            } else if (updated) {
+              latestSession = updated;
+            }
+          } catch (err) {
+            console.error('[SessionRestore] Exception updating started_work_time:', err);
+            latestSession = { ...latestSession, started_work_time: startTime };
+          }
+        }
+
+        // Check if day has been finished - don't restore if it has
+        if (latestSession.day_finished) {
+          console.warn('[SessionRestore] Day already finished, clearing cache');
+          eApi.clearSessionCache?.();
+          return;
+        }
+
         setEmployee(cached.employee);
         setSession(latestSession);
         setPlanFlowCompleted(true);
@@ -133,20 +212,33 @@ export default function App() {
       const eApi = api();
       if (!eApi) return;
 
-      const shouldLock = screen === 'plan' || (screen === 'motivation' && !planFlowCompleted);
+      // Lock for: login, plan, motivation (until plan flow complete), and admin
+      const shouldLock = screen === 'login' || screen === 'plan' || (screen === 'motivation' && !planFlowCompleted) || screen === 'admin';
 
       if (shouldLock) {
         setWindowLocked(true);
         try {
+          // Lock the window: prevent closing and minimizing
           await eApi?.setWindowClosable?.(false);
           await eApi?.setWindowMinimizable?.(false);
-        } catch {}
+          // Enable kiosk mode: prevent Alt+Tab and switching to other apps
+          await eApi?.enterKiosk?.();
+          console.log(`[App] Window locked + kiosk enabled for screen: ${screen}`);
+        } catch (err) {
+          console.error(`[App] Failed to lock window for ${screen}:`, err);
+        }
       } else {
         setWindowLocked(false);
         try {
+          // Unlock: allow closing, minimizing, and switching apps
           await eApi?.setWindowClosable?.(true);
           await eApi?.setWindowMinimizable?.(true);
-        } catch {}
+          // Exit kiosk mode: allow Alt+Tab and switching to other apps
+          await eApi?.exitKiosk?.();
+          console.log(`[App] Window unlocked + kiosk disabled for screen: ${screen}`);
+        } catch (err) {
+          console.error(`[App] Failed to unlock window for ${screen}:`, err);
+        }
       }
     };
     syncWindowLock();
@@ -201,8 +293,12 @@ export default function App() {
     try {
       await api()?.setWindowClosable?.(true);
       await api()?.setWindowMinimizable?.(true);
+      await api()?.exitKiosk?.();
+      console.log('[App] Plan completed - window unlocked, kiosk disabled, employee can now switch apps');
       setWindowLocked(false);
-    } catch {}
+    } catch (err) {
+      console.error('[App] Failed to unlock window after plan completion:', err);
+    }
 
     activitySyncService.startSyncingData(30000);
 
