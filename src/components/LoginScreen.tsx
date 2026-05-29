@@ -76,6 +76,43 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
         return;
       }
 
+      // Initialize Electron session counters with values from database
+      try {
+        const api = (window as any).electronAPI;
+        // Calculate elapsed time from started_work_time to now
+        const elapsedSeconds = session.started_work_time
+          ? Math.floor((Date.now() - new Date(session.started_work_time).getTime()) / 1000)
+          : 0;
+        
+        if (api?.invoke) {
+          const counters = {
+            activeSeconds: session.active_seconds || 0,
+            idleSeconds: session.idle_seconds || 0,
+            productiveSeconds: session.productive_seconds || 0,
+            sessionSeconds: Math.max(elapsedSeconds, (session.active_seconds || 0) + (session.idle_seconds || 0)),
+          };
+          console.log('[Login] Initializing Electron session counters:', counters);
+          await api.invoke('initialize-session-counters', counters.activeSeconds, counters.idleSeconds, counters.productiveSeconds, counters.sessionSeconds);
+        } else {
+          // Fallback to local server endpoint
+          const response = await fetch('http://127.0.0.1:5014/initialize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              activeSeconds: session.active_seconds || 0,
+              idleSeconds: session.idle_seconds || 0,
+              productiveSeconds: session.productive_seconds || 0,
+              sessionSeconds: Math.max(elapsedSeconds, (session.active_seconds || 0) + (session.idle_seconds || 0)),
+            }),
+          });
+          if (response.ok) {
+            console.log('[Login] Session counters initialized via local server');
+          }
+        }
+      } catch (err) {
+        console.error('[Login] Error initializing session counters:', err);
+      }
+
       console.log('[Login] Session created/fetched:', session.id);
       
       // Save credentials if "Remember Me" is checked

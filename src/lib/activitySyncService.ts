@@ -267,12 +267,13 @@ class ActivitySyncService {
       const lastSyncedLogTime = localStorage.getItem('lastSyncedLogTime') || '';
       let latestTimestamp = lastSyncedLogTime;
 
-      // Filter: completed logs only + newer than last sync
+      // Filter: ALL activity logs newer than last sync (including incomplete/in-progress ones)
+      // This ensures we capture activities even if they haven't completed yet
       const newLogs = data.activity_logs.filter(
-        log => log.duration_seconds > 0 && log.timestamp > lastSyncedLogTime
+        log => log.timestamp > lastSyncedLogTime
       );
 
-      console.log(`[Sync] Processing ${newLogs.length} new activity logs for upload`);
+      console.log(`[Sync] Processing ${newLogs.length} new activity logs for upload (including ${newLogs.filter(l => l.duration_seconds === 0).length} incomplete activities)`);
       
       for (const log of newLogs) {
         // Log website information when available for Chrome
@@ -280,20 +281,24 @@ class ActivitySyncService {
           console.log(`[Sync] 🌐 Browser Activity: ${log.app_name} | Website: ${log.website || '(no website)'} | Title: ${log.window_title}`);
         }
         
-        await createActivityLog({
-          session_id: sessionId,
-          employee_id: data.employee_id,
-          app_name: log.app_name || data.current_app,
-          window_title: log.window_title || '',
-          activity_type: log.type || 'idle',
-          idle_reason: log.productive === false ? 'Non-productive or idle' : null,
-          logged_at: log.timestamp || data.timestamp,
-          cpu_usage: log.cpu_usage,
-          memory_usage: log.memory_usage,
-          duration_seconds: log.duration_seconds,
-          productive: log.productive,
-          website: log.website,
-        });
+        // Only sync if we have a duration or if it's from within the last sync interval
+        // This prevents syncing activities that are too old but not completed
+        if (log.duration_seconds > 0 || (Date.now() - new Date(log.timestamp).getTime()) < 60000) {
+          await createActivityLog({
+            session_id: sessionId,
+            employee_id: data.employee_id,
+            app_name: log.app_name || data.current_app,
+            window_title: log.window_title || '',
+            activity_type: log.type || 'idle',
+            idle_reason: log.productive === false ? 'Non-productive or idle' : null,
+            logged_at: log.timestamp || data.timestamp,
+            cpu_usage: log.cpu_usage,
+            memory_usage: log.memory_usage,
+            duration_seconds: log.duration_seconds || 1, // Ensure at least 1 second for incomplete activities
+            productive: log.productive,
+            website: log.website,
+          });
+        }
 
         if (log.timestamp > latestTimestamp) {
           latestTimestamp = log.timestamp;

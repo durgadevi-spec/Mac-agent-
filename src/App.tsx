@@ -119,11 +119,14 @@ export default function App() {
           activitySyncService.startSyncingData(30000);
           
           // Restore counters in Electron activity monitor
+          const elapsedSecs1 = latestSession.started_work_time
+            ? Math.floor((Date.now() - new Date(latestSession.started_work_time).getTime()) / 1000)
+            : 0;
           await eApi.initializeSessionCounters?.(
             latestSession.active_seconds || 0,
             latestSession.idle_seconds || 0,
             latestSession.productive_seconds || 0,
-            (latestSession.active_seconds || 0) + (latestSession.idle_seconds || 0)
+            Math.max(elapsedSecs1, (latestSession.active_seconds || 0) + (latestSession.idle_seconds || 0))
           );
           eApi.showFloatingTimer?.();
           eApi.startTracking?.();
@@ -191,11 +194,14 @@ export default function App() {
         activitySyncService.startSyncingData(30000);
         
         // Restore counters in Electron activity monitor
+        const elapsedSecs2 = latestSession.started_work_time
+          ? Math.floor((Date.now() - new Date(latestSession.started_work_time).getTime()) / 1000)
+          : 0;
         await eApi.initializeSessionCounters?.(
           latestSession.active_seconds || 0,
           latestSession.idle_seconds || 0,
           latestSession.productive_seconds || 0,
-          (latestSession.active_seconds || 0) + (latestSession.idle_seconds || 0)
+          Math.max(elapsedSecs2, (latestSession.active_seconds || 0) + (latestSession.idle_seconds || 0))
         );
         eApi.showFloatingTimer?.();
         eApi.startTracking?.();
@@ -306,11 +312,14 @@ export default function App() {
     const eApi = api();
     if (eApi && employee && updatedSession) {
       // Initialize counters in Electron activity monitor
+      const elapsedSecs3 = updatedSession.started_work_time
+        ? Math.floor((Date.now() - new Date(updatedSession.started_work_time).getTime()) / 1000)
+        : 0;
       await eApi.initializeSessionCounters?.(
         updatedSession.active_seconds || 0,
         updatedSession.idle_seconds || 0,
         updatedSession.productive_seconds || 0,
-        (updatedSession.active_seconds || 0) + (updatedSession.idle_seconds || 0)
+        Math.max(elapsedSecs3, (updatedSession.active_seconds || 0) + (updatedSession.idle_seconds || 0))
       );
       await eApi.saveSessionCache?.({
         employee,

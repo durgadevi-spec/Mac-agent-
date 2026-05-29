@@ -141,8 +141,9 @@ const MonitoringDashboard: React.FC = () => {
   // Keep employee selection persistent across date changes
   // No need to reset initialSelectionDone when date changes
 
+  // Separate intervals: employee list refreshes every 30s, but activity logs refresh every 5s for real-time display
   useEffect(() => {
-    const loadDashboardData = async () => {
+    const loadEmployeeList = async () => {
       const dateString = format(selectedDate, 'yyyy-MM-dd');
       
       const [rawEmployees, rawSessions, rawActivityLogs] = await Promise.all([
@@ -156,12 +157,37 @@ const MonitoringDashboard: React.FC = () => {
         employeeMap.set(session.employee_id, session);
       });
 
+      // Group activity logs by employee to check if they have any activity today
+      const employeeActivityCount = new Map<string, number>();
+      rawActivityLogs.forEach((log) => {
+        const count = employeeActivityCount.get(log.employee_id) || 0;
+        employeeActivityCount.set(log.employee_id, count + 1);
+      });
+
       const updatedEmployees: EmployeeOverview[] = rawEmployees.map((emp) => {
         const session = employeeMap.get(emp.id);
-        const status: EmployeeOverview['status'] = session
-          ? session.active_seconds > 0
-            ? 'online'
-            : 'idle'
+        const activityCount = employeeActivityCount.get(emp.id) || 0;
+        
+        // Employee is "online" if they have ANY activity today (activity logs OR active/idle seconds)
+        // OR if they have a punch-in time and day isn't finished
+        const hasActivity = session && (session.active_seconds > 0 || session.idle_seconds > 0 || session.productive_seconds > 0);
+        const hasActivityLogs = activityCount > 0;
+        const hasPunchIn = session && session.punch_in_time && !session.day_finished;
+        const isRecentPunchIn = hasPunchIn && session.punch_in_time
+          ? (Date.now() - new Date(session.punch_in_time).getTime()) < 3600000 // Within last hour
+          : false;
+        
+        // Status determination:
+        // - "online" if has any activity (activity logs, active_seconds, idle_seconds, or productive_seconds) today
+        // - "online" if has punch-in today within last hour
+        // - "idle" if has session but no recent activity (more than 5 min idle)
+        // - "offline" if no session today or day is finished
+        const hasAnyActivity = hasActivity || hasActivityLogs;
+        
+        const status: EmployeeOverview['status'] = (hasAnyActivity || isRecentPunchIn)
+          ? 'online'
+          : session && !session.day_finished
+          ? 'idle'
           : 'offline';
 
         return {
@@ -189,10 +215,24 @@ const MonitoringDashboard: React.FC = () => {
       }
     };
 
-    loadDashboardData();
-    const interval = setInterval(loadDashboardData, 30000);
-    return () => clearInterval(interval);
+    loadEmployeeList();
+    const employeeListInterval = setInterval(loadEmployeeList, 30000);
+    return () => clearInterval(employeeListInterval);
   }, [selectedDate, initialSelectionDone]);
+
+  // Separate effect: refresh activity logs more frequently (every 5 seconds) for real-time display
+  useEffect(() => {
+    const loadActivityLogs = async () => {
+      const dateString = format(selectedDate, 'yyyy-MM-dd');
+      const rawActivityLogs = await fetchActivityLogsByDate(dateString);
+      console.log(`[Dashboard] Fetched ${rawActivityLogs.length} activity logs for date ${dateString}`);
+      setActivityLogs(rawActivityLogs);
+    };
+
+    loadActivityLogs();
+    const activityLogsInterval = setInterval(loadActivityLogs, 5000); // Refresh every 5 seconds for real-time display
+    return () => clearInterval(activityLogsInterval);
+  }, [selectedDate]);
 
   // Update selectedSession when employee or sessions change
   useEffect(() => {
@@ -232,13 +272,16 @@ const MonitoringDashboard: React.FC = () => {
     const selectedLogs = activityLogs.filter((log) => log.employee_id === selectedEmployee.id);
     const currentApp = selectedLogs.length > 0 ? selectedLogs[0].app_name : 'Unknown';
     
+    console.log(`[Dashboard] Selected employee: ${selectedEmployee.name} (${selectedEmployee.id})`);
+    console.log(`[Dashboard] Found ${employeeSessions.length} sessions and ${selectedLogs.length} activity logs`);
+    
     // Aggregate totals from ALL sessions for this employee today
     const productiveTime = employeeSessions.reduce((sum, s) => sum + (s.productive_seconds ?? 0), 0);
     const activeTime = employeeSessions.reduce((sum, s) => sum + (s.active_seconds ?? 0), 0);
     const idleTime = employeeSessions.reduce((sum, s) => sum + (s.idle_seconds ?? 0), 0);
     
     const productivity = activeTime > 0 ? Math.round((productiveTime / activeTime) * 100) : 0;
-    const sessionStartTime = selectedSession?.punch_in_time ?? new Date().toLocaleTimeString();
+    const sessionStartTime = selectedSession?.started_work_time ?? new Date().toLocaleTimeString();
 
     const loadScreenshots = async () => {
       setScreenshotsLoading(true);
@@ -620,8 +663,8 @@ const MonitoringDashboard: React.FC = () => {
                     <div>
                       <p className="text-gray-600 text-xs font-semibold">First Login Time</p>
                       <p className="font-semibold text-gray-900 text-sm mt-1">
-                        {selectedSession?.punch_in_time
-                          ? new Date(selectedSession.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        {selectedSession?.started_work_time
+                          ? new Date(selectedSession.started_work_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                           : 'N/A'}
                       </p>
                     </div>
