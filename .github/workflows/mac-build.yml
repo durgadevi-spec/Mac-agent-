@@ -1,0 +1,38 @@
+name: Build macOS App
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build_mac:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build macOS App
+        run: npm run build:mac
+        env:
+          # Optional: GitHub token for publishing releases later
+          GH_TOKEN: ${{ secrets.github_token }}
+
+      - name: Upload macOS build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Knockturn-Mac-App
+          path: release/*.dmg
+          retention-days: 7
