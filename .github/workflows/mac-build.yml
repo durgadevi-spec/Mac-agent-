@@ -24,12 +24,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Create .env file for build
+        run: |
+          echo "VITE_SUPABASE_URL=https://ogqmojvzeyasqoqhkpuz.supabase.co" > .env
+          echo "VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ncW1vanZ6ZXlhc3FvcWhrcHV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNTM1NTQsImV4cCI6MjA5NjgyOTU1NH0.kWuDdRb2bb8IAOMot5BnIvQzWefOAkYfIRmJxFqT4v8" >> .env
+
       - name: Build macOS App
         run: npm run build:mac
         env:
-          # Optional: GitHub token for publishing releases later
           GH_TOKEN: ${{ secrets.github_token }}
           MACOSX_DEPLOYMENT_TARGET: 10.15
+          VITE_SUPABASE_URL: "https://ogqmojvzeyasqoqhkpuz.supabase.co"
+          VITE_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ncW1vanZ6ZXlhc3FvcWhrcHV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNTM1NTQsImV4cCI6MjA5NjgyOTU1NH0.kWuDdRb2bb8IAOMot5BnIvQzWefOAkYfIRmJxFqT4v8"
 
       - name: Upload macOS build artifact
         uses: actions/upload-artifact@v4
