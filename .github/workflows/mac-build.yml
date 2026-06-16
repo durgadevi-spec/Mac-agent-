@@ -29,6 +29,7 @@ jobs:
         env:
           # Optional: GitHub token for publishing releases later
           GH_TOKEN: ${{ secrets.github_token }}
+          MACOSX_DEPLOYMENT_TARGET: 10.15
 
       - name: Upload macOS build artifact
         uses: actions/upload-artifact@v4
