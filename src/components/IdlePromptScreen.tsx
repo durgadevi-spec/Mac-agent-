@@ -64,7 +64,7 @@ export default function IdlePromptScreen() {
       try {
         const api = (window as any).electronAPI;
         const activity = await api?.getLatestActivity?.();
-        
+
         const now = Date.now();
         const durationSecs = idleStartTime ? Math.floor((now - idleStartTime) / 1000) : 0;
         const idleReasonText = `${wasWorking ? 'Working' : 'Away'}: ${reason || 'No details provided'}`;

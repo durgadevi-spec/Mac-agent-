@@ -93,6 +93,7 @@ let lastCpuUsage = 0;
 let lastMemoryUsage = 0;
 
 const psScriptPath = path.join(app.getPath('userData'), 'getActiveWindow.ps1');
+const scptScriptPath = path.join(app.getPath('userData'), 'getActiveWindow.scpt');
 
 const psScriptContent = `$definition = @"
 using System;
@@ -131,12 +132,56 @@ if ($hwnd -and $hwnd -ne [IntPtr]::Zero) {
     }
 }`;
 
+const scptScriptContent = `global frontApp, windowTitle
+set windowTitle to "Unknown"
+tell application "System Events"
+    set frontApp to name of first application process whose frontmost is true
+    try
+        tell process frontApp
+            if exists window 1 then
+                set windowTitle to name of window 1
+            end if
+        end tell
+    end try
+end tell
+return frontApp & "|" & windowTitle`;
+
 function writePsScriptIfNotExist() {
   try {
     fs.writeFileSync(psScriptPath, psScriptContent, { encoding: 'utf8' });
   } catch (err) {
     console.error('Failed to write getActiveWindow.ps1:', err);
   }
+  if (process.platform === 'darwin') {
+    try {
+      fs.writeFileSync(scptScriptPath, scptScriptContent, { encoding: 'utf8' });
+    } catch (err) {
+      console.error('Failed to write getActiveWindow.scpt:', err);
+    }
+  }
+}
+
+// macOS AppleScript fallback (cached 1s)
+let _macFallbackTs = 0;
+let _macFallbackCache: { ownerName: string; windowTitle: string } = { ownerName: 'Unknown', windowTitle: 'Unknown' };
+
+function getWindowViaMacFallback(): { ownerName: string; windowTitle: string } {
+  const now = Date.now();
+  if (now - _macFallbackTs < 1000) return _macFallbackCache;
+  _macFallbackTs = now;
+  try {
+    const raw = execSync(`osascript "${scptScriptPath}"`, { timeout: 800, encoding: 'utf8' }).trim();
+    if (raw && raw.includes('|')) {
+      const sep = raw.indexOf('|');
+      _macFallbackCache = {
+        ownerName: raw.slice(0, sep).trim(),
+        windowTitle: raw.slice(sep + 1).trim(),
+      };
+    }
+  } catch {
+    // keep cached values
+  }
+  return _macFallbackCache;
 }
 
 // PowerShell fallback (cached 1s)
@@ -397,11 +442,17 @@ async function refreshActivity() {
       console.warn('[Monitor] active-win failed, using PowerShell fallback');
     }
 
-    // Fallback: PowerShell Win32 API
+    // Fallback: PowerShell Win32 API / AppleScript macOS
     if (ownerName === 'Unknown' || ownerName === '') {
-      const fb = getWindowViaFallback();
-      ownerName = normalizeAppName(fb.ownerName);
-      windowTitle = fb.windowTitle || 'Unknown';
+      if (process.platform === 'win32') {
+        const fb = getWindowViaFallback();
+        ownerName = normalizeAppName(fb.ownerName);
+        windowTitle = fb.windowTitle || 'Unknown';
+      } else if (process.platform === 'darwin') {
+        const fb = getWindowViaMacFallback();
+        ownerName = normalizeAppName(fb.ownerName);
+        windowTitle = fb.windowTitle || 'Unknown';
+      }
     }
 
     // Update system metrics every 10 ticks (~10s)

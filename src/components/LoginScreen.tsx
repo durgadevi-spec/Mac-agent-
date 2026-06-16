@@ -120,9 +120,9 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
       try {
         const api = (window as any).electronAPI;
         // Calculate elapsed time from started_work_time to now
-        const elapsedSeconds = session.started_work_time
-          ? Math.floor((Date.now() - new Date(session.started_work_time).getTime()) / 1000)
-          : 0;
+        // const elapsedSeconds = session.started_work_time
+        //   ? Math.floor((Date.now() - new Date(session.started_work_time).getTime()) / 1000)
+        //   : 0;
         
         if (api?.invoke) {
           const counters = {

@@ -36,24 +36,24 @@ const initializeSupabase = (): SupabaseClient => {
 };
 
 export const supabase = new Proxy({} as SupabaseClient, {
-  get(target, prop) {
+  get(_target, prop) {
     const client = initializeSupabase();
     const value = (client as any)[prop];
     return typeof value === 'function' ? value.bind(client) : value;
   },
-  set(target, prop, value) {
+  set(_target, prop, value) {
     const client = initializeSupabase();
     (client as any)[prop] = value;
     return true;
   },
-  has(target, prop) {
+  has(_target, prop) {
     const client = initializeSupabase();
     return prop in client;
   },
-  ownKeys(target) {
+  ownKeys(_target) {
     return Reflect.ownKeys(initializeSupabase());
   },
-  getOwnPropertyDescriptor(target, prop) {
+  getOwnPropertyDescriptor(_target, prop) {
     const descriptor = Object.getOwnPropertyDescriptor(initializeSupabase(), prop);
     if (descriptor) descriptor.configurable = true;
     return descriptor;
@@ -261,8 +261,8 @@ export async function loginEmployee(
 export async function getTodaySession(employeeId: string): Promise<WorkSession | null> {
   try {
     const d = new Date();
-    const today = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
     // Check if session exists for today
     // Limit to the most recent matching session to avoid multiple-row errors
     const { data, error } = await supabase
@@ -758,7 +758,7 @@ export async function createScreenshot(entry: {
     url: entry.url || `${entry.app_name}-${entry.captured_at || new Date().toISOString()}`,
   };
 
-  const { data, error } = await supabase.from('screenshots').insert([payload]) as {
+  const { data, error } = await supabase.from('screenshots').insert([payload]).select() as {
     data: Screenshot[] | null;
     error: PostgrestError | null;
   };
@@ -939,7 +939,7 @@ export async function getMonitoringSettings(): Promise<MonitoringSettings | null
         track_keystrokes: true,
         blur_screenshots: false
       };
-      
+
       const { data: inserted, error: insertError } = await supabase
         .from('monitoring_settings')
         .insert([defaultSettings])
@@ -1086,8 +1086,8 @@ export async function updateAppSetting(key: string, value: string): Promise<bool
 }
 
 export async function logTimesheetLockEvent(
-  employeeId: string, 
-  employeeName: string, 
+  employeeId: string,
+  employeeName: string,
   eventType: 'WARNING' | 'LOCKED' | 'MANUAL_LOCK' | 'MANUAL_UNLOCK' | 'AUTO_UNLOCK',
   adminId?: string,
   adminName?: string,

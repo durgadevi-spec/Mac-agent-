@@ -27,6 +27,7 @@ import {
   BarChart2,
   Shield,
   Eye,
+  Download,
   X
 } from 'lucide-react';
 import {
@@ -117,7 +118,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
   const [settingsTab, setSettingsTab] = useState<'profile' | 'timings' | 'monitoring' | 'notifications'>('monitoring');
 
   // Overview / Detailed dashboard views
-  const [activeView, setActiveView] = useState<'overview' | 'detailed'>('overview'); // eslint-disable-line @typescript-eslint/no-unused-vars
+  // const [activeView, setActiveView] = useState<'overview' | 'detailed'>('overview'); // eslint-disable-line @typescript-eslint/no-unused-vars
 
   // Settings Form State
   const [idleTimeout, setIdleTimeout] = useState<number>(10);
@@ -149,7 +150,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [themeMode, setThemeMode] = useState<'light' | 'dark'>('light');
   const [accessControlSearch, setAccessControlSearch] = useState('');
-  const [allRecentSessions, setAllRecentSessions] = useState<WorkSession[]>([]);
+  const [_allRecentSessions, setAllRecentSessions] = useState<WorkSession[]>([]);
 
   // Employee Add / App Config State
   const [isAddEmployeeModalOpen, setIsAddEmployeeModalOpen] = useState(false);
@@ -189,7 +190,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
     }
     return now.toISOString().slice(0, 10);
   });
-  
+
   // Timesheet Config State
   const [tsCheckTime, setTsCheckTime] = useState('11:00');
   const [tsWarnTime, setTsWarnTime] = useState('11:30');
@@ -197,7 +198,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
   const [enableLockEnforcement, setEnableLockEnforcement] = useState(true);
   const [isSavingTsConfig, setIsSavingTsConfig] = useState(false);
   const [releasingUserId, setReleasingUserId] = useState<string | null>(null);
-  
+
   const [selectedComplianceDetails, setSelectedComplianceDetails] = useState<any>(null);
   const [isComplianceModalOpen, setIsComplianceModalOpen] = useState(false);
   const [isFetchingCompliance, setIsFetchingCompliance] = useState<string | null>(null);
@@ -292,8 +293,73 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
   const [reportEndDate, setReportEndDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [reportDeptFilter, setReportDeptFilter] = useState('All Departments');
   const [reportSearch, setReportSearch] = useState('');
-  // Reports inner tab: 'summary' | 'chart'
-  const [reportInnerTab, setReportInnerTab] = useState<'summary' | 'chart'>('summary');
+  // Reports inner tab: 'summary' | 'chart' | 'exports'
+  const [reportInnerTab, setReportInnerTab] = useState<'summary' | 'chart' | 'exports'>('summary');
+
+  // Export Archives State
+  interface ReportArchive {
+    id: string;
+    export_date: string;
+    status: 'SUCCESS' | 'FAILED';
+    archive_url: string | null;
+    archive_size_bytes: number;
+    records_exported: number;
+    records_deleted: number;
+    error_message: string | null;
+    created_at: string;
+  }
+  const [archivesData, setArchivesData] = React.useState<ReportArchive[]>([]);
+  const [archivesLoading, setArchivesLoading] = React.useState(false);
+  // const [exportingDate, setExportingDate] = React.useState('');
+  const [manualBackendUrl, setManualBackendUrl] = React.useState('http://82.25.109.136:5001');
+  const [manualExportDate, setManualExportDate] = React.useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10);
+  });
+  const [triggeringExport, setTriggeringExport] = React.useState(false);
+  const [exportMsg, setExportMsg] = React.useState<{ type: 'success' | 'error', text: string } | null>(null);
+
+  const fetchArchives = React.useCallback(async () => {
+    setArchivesLoading(true);
+    try {
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+      const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const resp = await fetch(
+        `${SUPABASE_URL}/rest/v1/report_archives?select=*&order=export_date.desc&limit=30`,
+        { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        setArchivesData(data as ReportArchive[]);
+      }
+    } catch (e) {
+      console.error('Failed to fetch archives:', e);
+    } finally {
+      setArchivesLoading(false);
+    }
+  }, []);
+
+  const triggerManualExport = async (dateStr: string) => {
+    setTriggeringExport(true);
+    setExportMsg(null);
+    try {
+      const resp = await fetch(`${manualBackendUrl}/api/export/specific-date`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: dateStr })
+      });
+      const result = await resp.json();
+      if (result.success) {
+        setExportMsg({ type: 'success', text: `Export for ${dateStr} completed! Archive is ready.` });
+        fetchArchives();
+      } else {
+        setExportMsg({ type: 'error', text: `Export failed: ${result.error || 'Unknown error'}` });
+      }
+    } catch (err: any) {
+      setExportMsg({ type: 'error', text: `Could not connect to backend service. Ensure it is running on port 3001. Error: ${err.message}` });
+    } finally {
+      setTriggeringExport(false);
+    }
+  };
 
   // Attendance Chart State
   interface AttendanceDayStatus { date: string; status: 'P' | 'A' | 'HP' | 'L' | 'H' | 'NW'; }
@@ -507,7 +573,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
           const empCodes = updatedEmployeeList
             .map(e => e.employee_code)
             .filter((c): c is string => !!c);
-          
+
           if (empCodes.length > 0) {
             const { results } = await eApi.checkTimesheetsSubmittedBatch(empCodes, accessControlDate);
             updatedEmployeeList.forEach(e => {
@@ -582,7 +648,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
           const empCodes = employeesList
             .map(e => e.employee_code)
             .filter((c): c is string => !!c);
-          
+
           if (empCodes.length > 0) {
             const { results } = await eApi.checkTimesheetsSubmittedBatch(empCodes, accessControlDate);
             setEmployeesList(prev => prev.map(e => {
@@ -597,7 +663,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
         console.error('Failed to fetch batch timesheet status', err);
       }
     };
-    
+
     // Only refetch if we already have employees loaded (initial load is handled by loadAdminStats)
     if (employeesList.length > 0) {
       fetchTimesheetStatuses();
@@ -723,7 +789,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
       await updateAppSetting('timesheet_warning_time', tsWarnTime);
       await updateAppSetting('timesheet_lock_time', tsLockTime);
       await updateAppSetting('enable_lock_screen_enforcement', enableLockEnforcement ? 'true' : 'false');
-      
+
       setToastMessage('Timesheet config saved successfully!');
       setShowToast(true);
       setTimeout(() => setShowToast(false), 3000);
@@ -743,7 +809,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
     try {
       // Log event in DB
       await logTimesheetLockEvent(emp.id, emp.name, 'MANUAL_LOCK', undefined, 'Administrator', reason);
-      
+
       if (emp.status !== 'online') {
         setToastMessage(`Employee is offline. Lock command will be applied when the Agent reconnects.`);
       } else {
@@ -770,7 +836,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
     try {
       // Log event in DB
       await logTimesheetLockEvent(emp.id, emp.name, 'MANUAL_UNLOCK', undefined, 'Administrator', reason);
-      
+
       setToastMessage(`Unlocked ${emp.name} successfully!`);
       setShowToast(true);
       setTimeout(() => setShowToast(false), 3000);
@@ -887,9 +953,9 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
         setIsAppConfigModalOpen(false);
         setTimeout(() => setShowToast(false), 3000);
         // Optimistically update list
-        setEmployeesList(prev => prev.map(emp => 
-          emp.id === selectedEmployeeForApps.id 
-            ? { ...emp, productive_apps: selectedProductiveApps } 
+        setEmployeesList(prev => prev.map(emp =>
+          emp.id === selectedEmployeeForApps.id
+            ? { ...emp, productive_apps: selectedProductiveApps }
             : emp
         ));
       }
@@ -916,7 +982,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
     const totalHrs = e.totalSeconds / 3600;
     const activeHrs = e.activeSeconds / 3600;
     const idleHrs = e.idleSeconds / 3600;
-    
+
     acc.total += totalHrs;
     acc.active += activeHrs;
     acc.idle += idleHrs;
@@ -928,22 +994,22 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
 
   const downloadReportsCSV = () => {
     const headers = ['Employee', 'Department', 'Total Hours', 'Active Hours', 'Idle Hours', 'Productivity'];
-    
+
     const rows = filteredReportList.map(e => {
       const totalHrs = (e.totalSeconds / 3600).toFixed(1);
       const activeHrs = (e.activeSeconds / 3600).toFixed(1);
       const idleHrs = (e.idleSeconds / 3600).toFixed(1);
-      
+
       return [
-        `"${e.name}"`, 
-        `"${e.department}"`, 
-        `${totalHrs}h`, 
-        `${activeHrs}h`, 
-        `${idleHrs}h`, 
+        `"${e.name}"`,
+        `"${e.department}"`,
+        `${totalHrs}h`,
+        `${activeHrs}h`,
+        `${idleHrs}h`,
         `${Math.round(e.productivity)}%`
       ].join(',');
     });
-    
+
     const csvContent = [headers.join(','), ...rows].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
@@ -1827,7 +1893,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
                   </button>
-                  <button 
+                  <button
                     onClick={() => {
                       setEditingEmployeeId(null);
                       setNewEmployee({ first_name: '', last_name: '', email: '', position: '', department: '', role: 'employee', phone: '', employee_code: '', password: '', shift_start: '', shift_end: '', timesheet_exempt: false });
@@ -1909,80 +1975,80 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                         </tr>
                       ) : (
                         employeesList
-                        .filter(e => employeeDeptFilter === 'All Departments' || e.department === employeeDeptFilter)
-                        .filter(e => employeeStatusFilter === 'All Status' || e.status === employeeStatusFilter)
-                        .filter(e => !employeeSearch || e.name.toLowerCase().includes(employeeSearch.toLowerCase()) || e.email?.toLowerCase().includes(employeeSearch.toLowerCase()))
-                        .map(e => (
-                          <tr key={e.id} className="hover:bg-slate-50/50 transition">
-                            <td className="py-4 px-6">
-                              <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-600 font-bold flex items-center justify-center shrink-0 border border-blue-200 shadow-sm">
-                                  {e.name.charAt(0).toUpperCase()}
+                          .filter(e => employeeDeptFilter === 'All Departments' || e.department === employeeDeptFilter)
+                          .filter(e => employeeStatusFilter === 'All Status' || e.status === employeeStatusFilter)
+                          .filter(e => !employeeSearch || e.name.toLowerCase().includes(employeeSearch.toLowerCase()) || e.email?.toLowerCase().includes(employeeSearch.toLowerCase()))
+                          .map(e => (
+                            <tr key={e.id} className="hover:bg-slate-50/50 transition">
+                              <td className="py-4 px-6">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-600 font-bold flex items-center justify-center shrink-0 border border-blue-200 shadow-sm">
+                                    {e.name.charAt(0).toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <p className="font-semibold text-slate-800">{e.name}</p>
+                                    <p className="text-xs text-slate-500 mt-0.5">{e.email || '—'}</p>
+                                  </div>
                                 </div>
-                                <div>
-                                  <p className="font-semibold text-slate-800">{e.name}</p>
-                                  <p className="text-xs text-slate-500 mt-0.5">{e.email || '—'}</p>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="py-4 px-6 text-slate-600 font-medium">{e.department || '—'}</td>
-                            <td className="py-4 px-6 text-slate-600 font-medium">{e.position || '—'}</td>
-                            <td className="py-4 px-6 capitalize text-slate-600">{e.role}</td>
-                            <td className="py-4 px-6">
-                              <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold ${getStatusColor(e.status)}`}>
-                                {e.status.charAt(0).toUpperCase() + e.status.slice(1)}
-                              </span>
-                            </td>
-                            <td className="py-4 px-6">
-                               <div className="flex items-center gap-2">
+                              </td>
+                              <td className="py-4 px-6 text-slate-600 font-medium">{e.department || '—'}</td>
+                              <td className="py-4 px-6 text-slate-600 font-medium">{e.position || '—'}</td>
+                              <td className="py-4 px-6 capitalize text-slate-600">{e.role}</td>
+                              <td className="py-4 px-6">
+                                <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold ${getStatusColor(e.status)}`}>
+                                  {e.status.charAt(0).toUpperCase() + e.status.slice(1)}
+                                </span>
+                              </td>
+                              <td className="py-4 px-6">
+                                <div className="flex items-center gap-2">
                                   <span className={`w-2 h-2 rounded-full ${e.status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></span>
                                   <span className="text-xs text-slate-500 font-medium">{e.sessionDuration !== 'N/A' ? e.sessionDuration : '—'}</span>
-                               </div>
-                            </td>
-                            <td className="py-4 px-6 text-right space-x-2">
-                              <button 
-                                onClick={() => {
-                                  setEditingEmployeeId(e.id);
-                                  // Split name to first and last (basic)
-                                  const parts = e.name.split(' ');
-                                  const first_name = parts[0];
-                                  const last_name = parts.slice(1).join(' ');
-                                  
-                                  setNewEmployee({
-                                    first_name,
-                                    last_name,
-                                    email: e.email || '',
-                                    position: e.position || '',
-                                    department: e.department && e.department !== 'Administration' && e.department !== 'Productivity Dept' ? e.department : '',
-                                    role: e.role || 'employee',
-                                    phone: '', // Need proper API fetch if we want phone, skipping for now
-                                    employee_code: e.employee_code || '', 
-                                    password: '',
-                                    shift_start: e.shift_start || '',
-                                    shift_end: e.shift_end || '',
-                                    timesheet_exempt: (e as any).timesheet_exempt || false
-                                  });
-                                  setIsAddEmployeeModalOpen(true);
-                                }}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition border border-transparent hover:border-blue-100" 
-                                title="Edit Employee"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                              </button>
-                              <button 
-                                onClick={() => {
-                                  setSelectedEmployeeForApps(e);
-                                  setSelectedProductiveApps(e.productive_apps || []);
-                                  setIsAppConfigModalOpen(true);
-                                }}
-                                className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition border border-transparent hover:border-blue-100" 
-                                title="Configure Productive Apps"
-                              >
-                                <Settings className="w-4 h-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))
+                                </div>
+                              </td>
+                              <td className="py-4 px-6 text-right space-x-2">
+                                <button
+                                  onClick={() => {
+                                    setEditingEmployeeId(e.id);
+                                    // Split name to first and last (basic)
+                                    const parts = e.name.split(' ');
+                                    const first_name = parts[0];
+                                    const last_name = parts.slice(1).join(' ');
+
+                                    setNewEmployee({
+                                      first_name,
+                                      last_name,
+                                      email: e.email || '',
+                                      position: e.position || '',
+                                      department: e.department && e.department !== 'Administration' && e.department !== 'Productivity Dept' ? e.department : '',
+                                      role: e.role || 'employee',
+                                      phone: '', // Need proper API fetch if we want phone, skipping for now
+                                      employee_code: e.employee_code || '',
+                                      password: '',
+                                      shift_start: e.shift_start || '',
+                                      shift_end: e.shift_end || '',
+                                      timesheet_exempt: (e as any).timesheet_exempt || false
+                                    });
+                                    setIsAddEmployeeModalOpen(true);
+                                  }}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition border border-transparent hover:border-blue-100"
+                                  title="Edit Employee"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setSelectedEmployeeForApps(e);
+                                    setSelectedProductiveApps(e.productive_apps || []);
+                                    setIsAppConfigModalOpen(true);
+                                  }}
+                                  className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition border border-transparent hover:border-blue-100"
+                                  title="Configure Productive Apps"
+                                >
+                                  <Settings className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))
                       )}
                     </tbody>
                   </table>
@@ -2000,7 +2066,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
               <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
                 <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between shrink-0">
                   <h3 className="text-lg font-bold text-slate-900">{editingEmployeeId ? 'Edit Employee' : 'Add Employee'}</h3>
-                  <button 
+                  <button
                     onClick={() => setIsAddEmployeeModalOpen(false)}
                     className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
                   >
@@ -2009,50 +2075,50 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                     </svg>
                   </button>
                 </div>
-                
+
                 <div className="p-6 overflow-y-auto space-y-5">
                   <div className="grid grid-cols-2 gap-5">
                     <div className="space-y-1.5">
                       <label className="text-sm font-semibold text-slate-700">First Name <span className="text-rose-500">*</span></label>
-                      <input 
-                        type="text" 
+                      <input
+                        type="text"
                         value={newEmployee.first_name}
-                        onChange={(e) => setNewEmployee({...newEmployee, first_name: e.target.value})}
+                        onChange={(e) => setNewEmployee({ ...newEmployee, first_name: e.target.value })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:border-blue-500 outline-none transition"
                       />
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-sm font-semibold text-slate-700">Last Name</label>
-                      <input 
-                        type="text" 
+                      <input
+                        type="text"
                         value={newEmployee.last_name}
-                        onChange={(e) => setNewEmployee({...newEmployee, last_name: e.target.value})}
+                        onChange={(e) => setNewEmployee({ ...newEmployee, last_name: e.target.value })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:border-blue-500 outline-none transition"
                       />
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-sm font-semibold text-slate-700">Email</label>
-                      <input 
-                        type="email" 
+                      <input
+                        type="email"
                         value={newEmployee.email}
-                        onChange={(e) => setNewEmployee({...newEmployee, email: e.target.value})}
+                        onChange={(e) => setNewEmployee({ ...newEmployee, email: e.target.value })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:border-blue-500 outline-none transition"
                       />
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-sm font-semibold text-slate-700">Position</label>
-                      <input 
-                        type="text" 
+                      <input
+                        type="text"
                         value={newEmployee.position}
-                        onChange={(e) => setNewEmployee({...newEmployee, position: e.target.value})}
+                        onChange={(e) => setNewEmployee({ ...newEmployee, position: e.target.value })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:border-blue-500 outline-none transition"
                       />
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-sm font-semibold text-slate-700">Department</label>
-                      <select 
+                      <select
                         value={newEmployee.department}
-                        onChange={(e) => setNewEmployee({...newEmployee, department: e.target.value})}
+                        onChange={(e) => setNewEmployee({ ...newEmployee, department: e.target.value })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:border-blue-500 outline-none transition appearance-none"
                       >
                         <option value="">— No Department —</option>
@@ -2064,9 +2130,9 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-sm font-semibold text-slate-700">Role</label>
-                      <select 
+                      <select
                         value={newEmployee.role}
-                        onChange={(e) => setNewEmployee({...newEmployee, role: e.target.value})}
+                        onChange={(e) => setNewEmployee({ ...newEmployee, role: e.target.value })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:border-blue-500 outline-none transition appearance-none"
                       >
                         <option value="employee">Employee</option>
@@ -2076,10 +2142,10 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                     </div>
                     <div className="space-y-1.5 col-span-2 sm:col-span-1">
                       <label className="text-sm font-semibold text-slate-700">Phone</label>
-                      <input 
-                        type="tel" 
+                      <input
+                        type="tel"
                         value={newEmployee.phone}
-                        onChange={(e) => setNewEmployee({...newEmployee, phone: e.target.value})}
+                        onChange={(e) => setNewEmployee({ ...newEmployee, phone: e.target.value })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:border-blue-500 outline-none transition"
                       />
                     </div>
@@ -2088,44 +2154,44 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                   {/* System specific fields */}
                   <div className="pt-4 mt-4 border-t border-slate-100 grid grid-cols-2 gap-5">
                     <div className="space-y-1.5">
-                        <label className="text-sm font-semibold text-slate-700">Employee Code (Login ID) <span className="text-rose-500">*</span></label>
-                        <input 
-                          type="text" 
-                          value={newEmployee.employee_code}
-                          onChange={(e) => setNewEmployee({...newEmployee, employee_code: e.target.value})}
-                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:border-blue-500 outline-none transition"
-                        />
+                      <label className="text-sm font-semibold text-slate-700">Employee Code (Login ID) <span className="text-rose-500">*</span></label>
+                      <input
+                        type="text"
+                        value={newEmployee.employee_code}
+                        onChange={(e) => setNewEmployee({ ...newEmployee, employee_code: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:border-blue-500 outline-none transition"
+                      />
                     </div>
                     <div className="space-y-1.5">
-                        <label className="text-sm font-semibold text-slate-700">Password {editingEmployeeId ? '(Leave blank to keep current)' : <span className="text-rose-500">*</span>}</label>
-                        <input 
-                          type="password" 
-                          value={newEmployee.password}
-                          onChange={(e) => setNewEmployee({...newEmployee, password: e.target.value})}
-                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:border-blue-500 outline-none transition"
-                        />
+                      <label className="text-sm font-semibold text-slate-700">Password {editingEmployeeId ? '(Leave blank to keep current)' : <span className="text-rose-500">*</span>}</label>
+                      <input
+                        type="password"
+                        value={newEmployee.password}
+                        onChange={(e) => setNewEmployee({ ...newEmployee, password: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:border-blue-500 outline-none transition"
+                      />
                     </div>
                   </div>
 
                   {/* Shift Timings */}
                   <div className="pt-4 mt-4 border-t border-slate-100 grid grid-cols-2 gap-5">
                     <div className="space-y-1.5">
-                        <label className="text-sm font-semibold text-slate-700">Shift Start (Mobile Tracking) <span className="text-slate-400 font-normal ml-1">(Optional)</span></label>
-                        <input 
-                          type="time" 
-                          value={newEmployee.shift_start}
-                          onChange={(e) => setNewEmployee({...newEmployee, shift_start: e.target.value})}
-                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:border-blue-500 outline-none transition"
-                        />
+                      <label className="text-sm font-semibold text-slate-700">Shift Start (Mobile Tracking) <span className="text-slate-400 font-normal ml-1">(Optional)</span></label>
+                      <input
+                        type="time"
+                        value={newEmployee.shift_start}
+                        onChange={(e) => setNewEmployee({ ...newEmployee, shift_start: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:border-blue-500 outline-none transition"
+                      />
                     </div>
                     <div className="space-y-1.5">
-                        <label className="text-sm font-semibold text-slate-700">Shift End (Mobile Tracking) <span className="text-slate-400 font-normal ml-1">(Optional)</span></label>
-                        <input 
-                          type="time" 
-                          value={newEmployee.shift_end}
-                          onChange={(e) => setNewEmployee({...newEmployee, shift_end: e.target.value})}
-                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:border-blue-500 outline-none transition"
-                        />
+                      <label className="text-sm font-semibold text-slate-700">Shift End (Mobile Tracking) <span className="text-slate-400 font-normal ml-1">(Optional)</span></label>
+                      <input
+                        type="time"
+                        value={newEmployee.shift_end}
+                        onChange={(e) => setNewEmployee({ ...newEmployee, shift_end: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:border-blue-500 outline-none transition"
+                      />
                     </div>
                   </div>
                   <p className="text-xs text-slate-500 mt-3">
@@ -2134,13 +2200,13 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                 </div>
 
                 <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50">
-                  <button 
+                  <button
                     onClick={() => setIsAddEmployeeModalOpen(false)}
                     className="px-5 py-2.5 rounded-lg border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-white hover:text-slate-800 transition"
                   >
                     Cancel
                   </button>
-                  <button 
+                  <button
                     onClick={handleAddEmployeeSubmit}
                     disabled={isSavingEmployee}
                     className="px-5 py-2.5 rounded-lg bg-[#0ea5e9] text-white text-sm font-semibold hover:bg-sky-600 transition shadow-sm flex items-center gap-2 disabled:bg-sky-400"
@@ -2162,7 +2228,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                     <h3 className="text-lg font-bold text-slate-900">Configure Apps</h3>
                     <p className="text-xs text-slate-500 mt-1">Select productive apps for <strong>{selectedEmployeeForApps.name}</strong></p>
                   </div>
-                  <button 
+                  <button
                     onClick={() => setIsAppConfigModalOpen(false)}
                     className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
                   >
@@ -2171,94 +2237,93 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                     </svg>
                   </button>
                 </div>
-                
+
                 <div className="p-6 overflow-y-auto max-h-[50vh]">
-                   <div className="space-y-3">
-                     {classifications.length === 0 ? (
-                        <p className="text-sm text-slate-500">No apps registered in global settings yet.</p>
-                     ) : (
-                       classifications.map(app => (
-                         <label key={app.id} className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:bg-slate-50 cursor-pointer transition">
-                            <input 
-                              type="checkbox"
-                              checked={selectedProductiveApps.includes(app.name)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedProductiveApps(prev => [...prev, app.name]);
-                                } else {
-                                  setSelectedProductiveApps(prev => prev.filter(a => a !== app.name));
-                                }
-                              }}
-                              className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
-                            />
-                            <div className="flex-1">
-                               <p className="font-semibold text-slate-800 text-sm">{app.name}</p>
-                            </div>
-                            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                               app.classification === 'productive' ? 'bg-emerald-100 text-emerald-800' :
-                               app.classification === 'non_productive' ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600'
+                  <div className="space-y-3">
+                    {classifications.length === 0 ? (
+                      <p className="text-sm text-slate-500">No apps registered in global settings yet.</p>
+                    ) : (
+                      classifications.map(app => (
+                        <label key={app.id} className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:bg-slate-50 cursor-pointer transition">
+                          <input
+                            type="checkbox"
+                            checked={selectedProductiveApps.includes(app.name)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedProductiveApps(prev => [...prev, app.name]);
+                              } else {
+                                setSelectedProductiveApps(prev => prev.filter(a => a !== app.name));
+                              }
+                            }}
+                            className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                          />
+                          <div className="flex-1">
+                            <p className="font-semibold text-slate-800 text-sm">{app.name}</p>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${app.classification === 'productive' ? 'bg-emerald-100 text-emerald-800' :
+                              app.classification === 'non_productive' ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600'
                             }`}>
-                               Global: {app.classification}
-                            </span>
-                         </label>
-                       ))
-                     )}
-                   </div>
+                            Global: {app.classification}
+                          </span>
+                        </label>
+                      ))
+                    )}
+                  </div>
 
-                   {/* Add New App Inline */}
-                   <div className="mt-4 pt-4 border-t border-slate-100">
-                     <p className="text-xs font-semibold text-slate-600 mb-2">Add a new app</p>
-                     <div className="flex gap-2">
-                       <input
-                         type="text"
-                         placeholder="e.g. Slack, Notion..."
-                         value={newConfigAppName}
-                         onChange={(e) => setNewConfigAppName(e.target.value)}
-                         onKeyDown={(e) => {
-                           if (e.key === 'Enter' && newConfigAppName.trim()) {
-                             (async () => {
-                               const result = await saveAppClassification(newConfigAppName.trim(), 'productive');
-                               if (result) {
-                                 setClassifications(prev => [...prev, result].sort((a, b) => a.name.localeCompare(b.name)));
-                                 setSelectedProductiveApps(prev => [...prev, newConfigAppName.trim()]);
-                                 setNewConfigAppName('');
-                               }
-                             })();
-                           }
-                         }}
-                         className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-800 focus:bg-white focus:border-blue-500 outline-none transition placeholder:text-slate-400"
-                       />
-                       <button
-                         onClick={async () => {
-                           if (!newConfigAppName.trim()) return;
-                           const result = await saveAppClassification(newConfigAppName.trim(), 'productive');
-                           if (result) {
-                             setClassifications(prev => [...prev, result].sort((a, b) => a.name.localeCompare(b.name)));
-                             setSelectedProductiveApps(prev => [...prev, newConfigAppName.trim()]);
-                             setNewConfigAppName('');
-                           }
-                         }}
-                         className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition flex items-center gap-1.5 shrink-0"
-                       >
-                         <Plus className="w-3.5 h-3.5" />
-                         Add
-                       </button>
-                     </div>
-                   </div>
+                  {/* Add New App Inline */}
+                  <div className="mt-4 pt-4 border-t border-slate-100">
+                    <p className="text-xs font-semibold text-slate-600 mb-2">Add a new app</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="e.g. Slack, Notion..."
+                        value={newConfigAppName}
+                        onChange={(e) => setNewConfigAppName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && newConfigAppName.trim()) {
+                            (async () => {
+                              const result = await saveAppClassification(newConfigAppName.trim(), 'productive');
+                              if (result) {
+                                setClassifications(prev => [...prev, result].sort((a, b) => a.name.localeCompare(b.name)));
+                                setSelectedProductiveApps(prev => [...prev, newConfigAppName.trim()]);
+                                setNewConfigAppName('');
+                              }
+                            })();
+                          }
+                        }}
+                        className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-800 focus:bg-white focus:border-blue-500 outline-none transition placeholder:text-slate-400"
+                      />
+                      <button
+                        onClick={async () => {
+                          if (!newConfigAppName.trim()) return;
+                          const result = await saveAppClassification(newConfigAppName.trim(), 'productive');
+                          if (result) {
+                            setClassifications(prev => [...prev, result].sort((a, b) => a.name.localeCompare(b.name)));
+                            setSelectedProductiveApps(prev => [...prev, newConfigAppName.trim()]);
+                            setNewConfigAppName('');
+                          }
+                        }}
+                        className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition flex items-center gap-1.5 shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Add
+                      </button>
+                    </div>
+                  </div>
 
-                   <p className="text-xs text-slate-400 mt-4 leading-relaxed font-medium">
-                     Selected apps will be marked as &apos;Productive&apos; for this specific employee overriding the global defaults.
-                   </p>
+                  <p className="text-xs text-slate-400 mt-4 leading-relaxed font-medium">
+                    Selected apps will be marked as &apos;Productive&apos; for this specific employee overriding the global defaults.
+                  </p>
                 </div>
 
                 <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50">
-                  <button 
+                  <button
                     onClick={() => setIsAppConfigModalOpen(false)}
                     className="px-5 py-2.5 rounded-lg border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-white hover:text-slate-800 transition"
                   >
                     Cancel
                   </button>
-                  <button 
+                  <button
                     onClick={handleSaveAppConfig}
                     disabled={isSavingEmployee}
                     className="px-5 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition shadow-sm flex items-center gap-2 disabled:bg-emerald-400"
@@ -2284,7 +2349,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                   <button className="p-2 border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 transition shadow-sm bg-white">
                     <RefreshCw className="w-4 h-4" />
                   </button>
-                  <button 
+                  <button
                     onClick={downloadReportsCSV}
                     className="flex items-center gap-2 px-3 py-2 border border-slate-200 rounded-lg text-slate-700 text-sm font-semibold hover:bg-slate-50 transition shadow-sm bg-white"
                   >
@@ -2314,9 +2379,8 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                     <button
                       key={period}
                       onClick={() => setReportPeriod(period as any)}
-                      className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
-                        reportPeriod === period ? 'bg-white text-blue-600 shadow-sm border border-slate-200/60' : 'text-slate-500 hover:text-slate-700'
-                      }`}
+                      className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${reportPeriod === period ? 'bg-white text-blue-600 shadow-sm border border-slate-200/60' : 'text-slate-500 hover:text-slate-700'
+                        }`}
                     >
                       {period}
                     </button>
@@ -2362,35 +2426,36 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
 
               {/* Search */}
               <div className="bg-white p-2 rounded-xl shadow-sm border border-slate-200">
-                  <div className="relative w-full">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      placeholder="Search employee..."
-                      value={reportSearch}
-                      onChange={(e) => setReportSearch(e.target.value)}
-                      className="w-full pl-9 pr-4 py-2 rounded-lg bg-transparent text-sm outline-none transition placeholder:text-slate-400"
-                    />
-                  </div>
+                <div className="relative w-full">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Search employee..."
+                    value={reportSearch}
+                    onChange={(e) => setReportSearch(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2 rounded-lg bg-transparent text-sm outline-none transition placeholder:text-slate-400"
+                  />
+                </div>
               </div>
 
-              {/* Inner Tab Bar: Summary | Chart */}
+              {/* Inner Tab Bar: Summary | Chart | Exports */}
               <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-fit">
                 {[
                   { id: 'summary', label: 'Summary' },
                   { id: 'chart', label: '📊 Chart' },
+                  { id: 'exports', label: '📥 Data Exports' },
                 ].map(tab => (
                   <button
                     key={tab.id}
                     onClick={() => {
                       setReportInnerTab(tab.id as any);
                       if (tab.id === 'chart') fetchAttendanceChart(reportStartDate, reportEndDate);
+                      if (tab.id === 'exports') fetchArchives();
                     }}
-                    className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition ${
-                      reportInnerTab === tab.id
+                    className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition ${reportInnerTab === tab.id
                         ? 'bg-white text-teal-600 shadow-sm border border-slate-200/60'
                         : 'text-slate-500 hover:text-slate-700'
-                    }`}
+                      }`}
                   >
                     {tab.label}
                   </button>
@@ -2521,7 +2586,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                             {attendanceDates.map(date => {
                               const d = new Date(date);
                               const day = d.getDate();
-                              const dow = ['Su','Mo','Tu','We','Th','Fr','Sa'][d.getDay()];
+                              const dow = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'][d.getDay()];
                               return (
                                 <th key={date} className="py-2 px-1 text-center min-w-[38px] font-semibold">
                                   <div className="text-slate-700">{day}</div>
@@ -2547,11 +2612,11 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                                   <td className="py-3 px-4 text-center text-slate-500">{weekOffCount}</td>
                                   {row.days.map(day => {
                                     const statusStyles: Record<string, string> = {
-                                      P:  'bg-emerald-500 text-white',
+                                      P: 'bg-emerald-500 text-white',
                                       HP: 'bg-amber-400 text-white',
-                                      A:  'bg-red-400 text-white',
-                                      L:  'bg-blue-300 text-white',
-                                      H:  'bg-purple-400 text-white',
+                                      A: 'bg-red-400 text-white',
+                                      L: 'bg-blue-300 text-white',
+                                      H: 'bg-purple-400 text-white',
                                       NW: 'bg-slate-200 text-slate-500',
                                     };
                                     return (
@@ -2595,13 +2660,191 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                   )}
                 </div>
               )}
+
+              {/* =================== DATA EXPORTS TAB =================== */}
+              {reportInnerTab === 'exports' && (
+                <div className="space-y-6">
+                  {/* Manual Export Controls */}
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                    <h3 className="text-base font-bold text-slate-800 mb-1">Manual Export</h3>
+                    <p className="text-xs text-slate-500 mb-4">Trigger an on-demand export for a specific date. The backend service must be running for this to work.</p>
+                    <div className="flex flex-wrap items-end gap-3 mb-4">
+                      <div className="flex-1 min-w-[200px] max-w-sm">
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">Backend Service URL</label>
+                        <input
+                          type="text"
+                          value={manualBackendUrl}
+                          onChange={e => setManualBackendUrl(e.target.value)}
+                          placeholder="http://82.25.109.136:5001"
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-700 focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">Export Date</label>
+                        <input
+                          type="date"
+                          value={manualExportDate}
+                          onChange={e => setManualExportDate(e.target.value)}
+                          className="px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-700 focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <button
+                        onClick={() => triggerManualExport(manualExportDate)}
+                        disabled={triggeringExport}
+                        className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white text-sm font-semibold rounded-lg hover:bg-teal-700 disabled:opacity-50 transition shadow-sm"
+                      >
+                        {triggeringExport ? (
+                          <><RefreshCw className="w-4 h-4 animate-spin" /> Exporting...</>
+                        ) : (
+                          <><Download className="w-4 h-4" /> Generate & Archive Report</>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => {
+                          const d = new Date(); d.setDate(d.getDate() - 1);
+                          triggerManualExport(d.toISOString().slice(0, 10));
+                        }}
+                        disabled={triggeringExport}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-50 transition shadow-sm"
+                      >
+                        <Download className="w-4 h-4" /> Export Yesterday
+                      </button>
+                    </div>
+                    {exportMsg && (
+                      <div className={`mt-3 px-4 py-2.5 rounded-lg text-sm font-medium ${exportMsg.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
+                        }`}>
+                        {exportMsg.text}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Export Status Dashboard */}
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                      <div>
+                        <h3 className="text-base font-bold text-slate-800">Export Status Dashboard</h3>
+                        <p className="text-xs text-slate-500 mt-0.5">Last 30 archive jobs</p>
+                      </div>
+                      <button
+                        onClick={fetchArchives}
+                        disabled={archivesLoading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${archivesLoading ? 'animate-spin' : ''}`} />
+                        Refresh
+                      </button>
+                    </div>
+
+                    {archivesLoading ? (
+                      <div className="flex items-center justify-center py-16 text-slate-400">
+                        <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading archives...
+                      </div>
+                    ) : archivesData.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+                        <Download className="w-10 h-10 mb-3 opacity-30" />
+                        <p className="font-medium text-slate-500">No export archives found</p>
+                        <p className="text-xs mt-1">Run the first export using the controls above</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-slate-50 border-b border-slate-100">
+                            <tr className="text-xs text-slate-500 font-semibold uppercase tracking-wider">
+                              <th className="py-3 px-5">Export Date</th>
+                              <th className="py-3 px-5">Status</th>
+                              <th className="py-3 px-5">Archive Size</th>
+                              <th className="py-3 px-5">Records Exported</th>
+                              <th className="py-3 px-5">Records Deleted</th>
+                              <th className="py-3 px-5">Generated At</th>
+                              <th className="py-3 px-5">Download</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {archivesData.map(archive => (
+                              <tr key={archive.id} className="hover:bg-slate-50/60 transition">
+                                <td className="py-3 px-5 font-semibold text-slate-800">{archive.export_date}</td>
+                                <td className="py-3 px-5">
+                                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${archive.status === 'SUCCESS'
+                                      ? 'bg-emerald-100 text-emerald-700'
+                                      : 'bg-red-100 text-red-700'
+                                    }`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${archive.status === 'SUCCESS' ? 'bg-emerald-500' : 'bg-red-500'
+                                      }`} />
+                                    {archive.status}
+                                    {archive.status === 'FAILED' && archive.error_message && (
+                                      <span className="ml-1 text-red-500 font-normal" title={archive.error_message}>⚠</span>
+                                    )}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-5 text-slate-600">
+                                  {archive.archive_size_bytes > 0
+                                    ? `${(archive.archive_size_bytes / 1024).toFixed(1)} KB`
+                                    : '—'}
+                                </td>
+                                <td className="py-3 px-5 text-slate-600">{archive.records_exported?.toLocaleString() || '0'}</td>
+                                <td className="py-3 px-5 text-red-500 font-medium">{archive.records_deleted?.toLocaleString() || '0'}</td>
+                                <td className="py-3 px-5 text-slate-500 text-xs">
+                                  {new Date(archive.created_at).toLocaleString()}
+                                </td>
+                                <td className="py-3 px-5">
+                                  {archive.archive_url ? (
+                                    <a
+                                      href={archive.archive_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 text-xs font-semibold rounded-lg hover:bg-blue-100 transition"
+                                    >
+                                      <Download className="w-3 h-3" /> Download ZIP
+                                    </a>
+                                  ) : (
+                                    <span className="text-slate-400 text-xs">Not available</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Retention Policy Info */}
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
+                    <h4 className="text-sm font-bold text-amber-800 mb-2">📋 Data Retention Policy</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-amber-700">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" />
+                        <span><strong>Activity Logs, Idle Logs, Alerts:</strong> Deleted after 48 hours (post-export)</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" />
+                        <span><strong>Screenshots:</strong> Deleted after 7 days (post-export)</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+                        <span><strong>Daily/Monthly Summaries:</strong> Retained permanently</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+                        <span><strong>ZIP Archives (Supabase Storage):</strong> Retained permanently</span>
+                      </div>
+                      <div className="flex items-center gap-2 md:col-span-2">
+                        <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
+                        <span><strong>Safety:</strong> Raw data is NEVER deleted unless Excel + ZIP + Upload + DB record all succeed</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
 
           {sidebarActive === 'analytics' && (() => {
             const emp = selectedAnalyticsEmployee === 'all' ? null : employeesList.find(e => e.id === selectedAnalyticsEmployee);
-            
+
             // Dynamic metrics
             const avgProductivity = emp ? emp.productivity : 89;
             const utilization = emp ? Math.round(emp.productivity * 0.85) : 75;
@@ -2611,11 +2854,11 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
             // Dynamic charts (mocked based on productivity)
             const baseProd = emp ? emp.productivity : 85;
             const weeklyData = [
-              { name: 'Mon', active: baseProd > 0 ? 7.2 * (baseProd/100) : 0, idle: 0.8, away: 0 },
-              { name: 'Tue', active: baseProd > 0 ? 6.8 * (baseProd/100) : 0, idle: 1.2, away: 0.2 },
-              { name: 'Wed', active: baseProd > 0 ? 7.5 * (baseProd/100) : 0, idle: 0.5, away: 0.4 },
-              { name: 'Thu', active: baseProd > 0 ? 6.5 * (baseProd/100) : 0, idle: 1.5, away: 0.3 },
-              { name: 'Fri', active: baseProd > 0 ? 7.0 * (baseProd/100) : 0, idle: 0.9, away: 0.2 },
+              { name: 'Mon', active: baseProd > 0 ? 7.2 * (baseProd / 100) : 0, idle: 0.8, away: 0 },
+              { name: 'Tue', active: baseProd > 0 ? 6.8 * (baseProd / 100) : 0, idle: 1.2, away: 0.2 },
+              { name: 'Wed', active: baseProd > 0 ? 7.5 * (baseProd / 100) : 0, idle: 0.5, away: 0.4 },
+              { name: 'Thu', active: baseProd > 0 ? 6.5 * (baseProd / 100) : 0, idle: 1.5, away: 0.3 },
+              { name: 'Fri', active: baseProd > 0 ? 7.0 * (baseProd / 100) : 0, idle: 0.9, away: 0.2 },
             ];
 
             const trendData = [
@@ -2635,7 +2878,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                   </div>
                   <div className="relative">
                     <Filter className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <select 
+                    <select
                       value={selectedAnalyticsEmployee}
                       onChange={(e) => setSelectedAnalyticsEmployee(e.target.value)}
                       className="appearance-none pl-9 pr-10 py-2 border border-slate-200 bg-white rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer transition"
@@ -2649,108 +2892,108 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                   </div>
                 </div>
 
-              {/* Stats Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                {/* Avg Productivity */}
-                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-                  <div>
-                    <p className="text-slate-500 text-sm font-medium mb-1">Avg Productivity</p>
-                    <h2 className="text-3xl font-bold text-slate-900">{avgProductivity}%</h2>
-                  </div>
-                  <div className="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center">
-                    <TrendingUp className="w-6 h-6 text-emerald-500" />
-                  </div>
-                </div>
-
-                {/* Utilization */}
-                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-                  <div>
-                    <p className="text-slate-500 text-sm font-medium mb-1">Utilization</p>
-                    <h2 className="text-3xl font-bold text-slate-900">{utilization}%</h2>
-                  </div>
-                  <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center">
-                    <Users className="w-6 h-6 text-blue-500" />
-                  </div>
-                </div>
-
-                {/* Avg Active Hours */}
-                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-                  <div>
-                    <p className="text-slate-500 text-sm font-medium mb-1">Avg Active Hours</p>
-                    <h2 className="text-3xl font-bold text-slate-900">{activeHours}h</h2>
-                  </div>
-                  <div className="w-12 h-12 rounded-xl bg-cyan-50 flex items-center justify-center">
-                    <Clock className="w-6 h-6 text-cyan-500" />
-                  </div>
-                </div>
-
-                {/* Idle Ratio */}
-                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-                  <div>
-                    <p className="text-slate-500 text-sm font-medium mb-1">Idle Ratio</p>
-                    <h2 className="text-3xl font-bold text-slate-900">{idleRatio}%</h2>
-                  </div>
-                  <div className="w-12 h-12 rounded-xl bg-amber-50 flex items-center justify-center">
-                    <BarChart2 className="w-6 h-6 text-amber-500" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Charts */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Weekly Activity Breakdown */}
-                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                  <h3 className="text-sm font-bold text-slate-900 mb-6">Weekly Activity Breakdown</h3>
-                  <div className="h-[300px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={weeklyData}
-                        margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                        barGap={4}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
-                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />
-                        <ChartTooltip
-                          cursor={{ fill: '#f8fafc' }}
-                          contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                        />
-                        <Bar dataKey="active" name="Active" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={16} />
-                        <Bar dataKey="idle" name="Idle" fill="#f59e0b" radius={[4, 4, 0, 0]} barSize={16} />
-                        <Bar dataKey="away" name="Away" fill="#f97316" radius={[4, 4, 0, 0]} barSize={16} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                {/* Productivity Trend */}
-                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col">
-                  <div className="flex justify-between items-start mb-6">
-                    <h3 className="text-sm font-bold text-slate-900">Productivity Trend (30 Days)</h3>
-                    <div className="flex items-center gap-2 text-xs font-medium text-blue-500">
-                      <div className="w-2 h-2 rounded-full bg-blue-500" />
-                      Productivity %
+                {/* Stats Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  {/* Avg Productivity */}
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                    <div>
+                      <p className="text-slate-500 text-sm font-medium mb-1">Avg Productivity</p>
+                      <h2 className="text-3xl font-bold text-slate-900">{avgProductivity}%</h2>
+                    </div>
+                    <div className="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center">
+                      <TrendingUp className="w-6 h-6 text-emerald-500" />
                     </div>
                   </div>
-                  <div className="h-[300px] flex-1">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart
-                        data={trendData}
-                        margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
-                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} />
-                        <ChartTooltip
-                          contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                        />
-                        <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
+
+                  {/* Utilization */}
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                    <div>
+                      <p className="text-slate-500 text-sm font-medium mb-1">Utilization</p>
+                      <h2 className="text-3xl font-bold text-slate-900">{utilization}%</h2>
+                    </div>
+                    <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center">
+                      <Users className="w-6 h-6 text-blue-500" />
+                    </div>
+                  </div>
+
+                  {/* Avg Active Hours */}
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                    <div>
+                      <p className="text-slate-500 text-sm font-medium mb-1">Avg Active Hours</p>
+                      <h2 className="text-3xl font-bold text-slate-900">{activeHours}h</h2>
+                    </div>
+                    <div className="w-12 h-12 rounded-xl bg-cyan-50 flex items-center justify-center">
+                      <Clock className="w-6 h-6 text-cyan-500" />
+                    </div>
+                  </div>
+
+                  {/* Idle Ratio */}
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                    <div>
+                      <p className="text-slate-500 text-sm font-medium mb-1">Idle Ratio</p>
+                      <h2 className="text-3xl font-bold text-slate-900">{idleRatio}%</h2>
+                    </div>
+                    <div className="w-12 h-12 rounded-xl bg-amber-50 flex items-center justify-center">
+                      <BarChart2 className="w-6 h-6 text-amber-500" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Charts */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Weekly Activity Breakdown */}
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                    <h3 className="text-sm font-bold text-slate-900 mb-6">Weekly Activity Breakdown</h3>
+                    <div className="h-[300px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={weeklyData}
+                          margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                          barGap={4}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />
+                          <ChartTooltip
+                            cursor={{ fill: '#f8fafc' }}
+                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                          />
+                          <Bar dataKey="active" name="Active" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={16} />
+                          <Bar dataKey="idle" name="Idle" fill="#f59e0b" radius={[4, 4, 0, 0]} barSize={16} />
+                          <Bar dataKey="away" name="Away" fill="#f97316" radius={[4, 4, 0, 0]} barSize={16} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Productivity Trend */}
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+                    <div className="flex justify-between items-start mb-6">
+                      <h3 className="text-sm font-bold text-slate-900">Productivity Trend (30 Days)</h3>
+                      <div className="flex items-center gap-2 text-xs font-medium text-blue-500">
+                        <div className="w-2 h-2 rounded-full bg-blue-500" />
+                        Productivity %
+                      </div>
+                    </div>
+                    <div className="h-[300px] flex-1">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                          data={trendData}
+                          margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} />
+                          <ChartTooltip
+                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                          />
+                          <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
             );
           })()}
 
@@ -2831,9 +3074,9 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                     <p className="text-xs text-slate-500">Configure when employees receive warnings and get locked out.</p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      className="sr-only peer" 
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
                       checked={enableLockEnforcement}
                       onChange={(e) => setEnableLockEnforcement(e.target.checked)}
                     />
@@ -2844,8 +3087,8 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-4">
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1.5">Check Time (HH:MM)</label>
-                    <input 
-                      type="time" 
+                    <input
+                      type="time"
                       value={tsCheckTime}
                       onChange={e => setTsCheckTime(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
@@ -2853,8 +3096,8 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1.5">Warning Time (HH:MM)</label>
-                    <input 
-                      type="time" 
+                    <input
+                      type="time"
                       value={tsWarnTime}
                       onChange={e => setTsWarnTime(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
@@ -2862,8 +3105,8 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1.5">Lock Time (HH:MM)</label>
-                    <input 
-                      type="time" 
+                    <input
+                      type="time"
                       value={tsLockTime}
                       onChange={e => setTsLockTime(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
@@ -2871,7 +3114,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                   </div>
                 </div>
                 <div className="flex justify-end">
-                  <button 
+                  <button
                     onClick={handleSaveTsConfig}
                     disabled={isSavingTsConfig}
                     className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-slate-800 disabled:opacity-50"
@@ -2896,7 +3139,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
                       className="w-full pl-9 pr-4 py-2 rounded-lg bg-slate-50 border border-transparent focus:bg-white focus:border-slate-200 text-sm outline-none transition placeholder:text-slate-400"
                     />
                   </div>
-                  
+
                   <div className="flex items-center gap-2">
                     <label className="text-sm text-slate-600 font-medium whitespace-nowrap">Timesheet Date:</label>
                     <div className="relative">

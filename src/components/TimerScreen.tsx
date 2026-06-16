@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Monitor, Clock, Zap, Coffee, Activity, LogOut, Droplets, Timer,
+  Monitor, Zap, Coffee, Activity, LogOut, Droplets, Timer,
   Globe, Code2, FileSpreadsheet, Mail, MessageSquare, Terminal,
   LayoutDashboard, Layers, ChevronDown, ChevronUp, Moon, XCircle, Play, PauseCircle, Calendar,
 } from 'lucide-react';
@@ -25,7 +25,7 @@ interface ActivityLogEntry {
   appName: string;
   windowTitle: string;
   website?: string;
-  type: 'app' | 'idle' | 'away';
+  type: 'app' | 'idle' | 'away' | 'idle_reason';
   productive: boolean;
   startTime: string;
   endTime?: string;

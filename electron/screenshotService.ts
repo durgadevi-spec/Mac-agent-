@@ -18,9 +18,10 @@ function debugLog(msg: string) {
 }
 
 let screenshotInterval: NodeJS.Timeout | null = null;
-let pendingScreenshots: Array<{ app_name: string; captured_at: string; screenshot_data: string; id: string }> = [];
+let pendingScreenshots: Array<{ employee_id: string; app_name: string; captured_at: string; screenshot_data: string; id: string }> = [];
 let currentIntervalMinutes = 3; // Default 3 minutes from settings image
 let lastSyncedScreenshotId = ''; // Track which screenshots have been synced
+let currentEmployeeId: string | null = null;
 
 let shouldBlurScreenshots = false;
 
@@ -40,6 +41,18 @@ export function updateScreenshotSettings(intervalMinutes: number, blur?: boolean
   }
 }
 
+export function setCurrentEmployeeId(id: string | null) {
+  currentEmployeeId = id;
+  if (!id) {
+    // If logging out or ID is cleared, wipe the buffer immediately so nothing gets mixed
+    pendingScreenshots = [];
+    lastSyncedScreenshotId = '';
+    debugLog('[Screenshot] Employee logged out. Cleared pending screenshots buffer.');
+  } else {
+    debugLog(`[Screenshot] Employee logged in: ${id}`);
+  }
+}
+
 export function startScreenshotService() {
   if (screenshotInterval) return;
 
@@ -55,9 +68,18 @@ export function startScreenshotService() {
 
   screenshotInterval = setInterval(async () => {
     try {
+      if (!currentEmployeeId) {
+        debugLog('[Screenshot] No employee currently logged in, skipping screenshot capture');
+        return;
+      }
+
       const activity = getCurrentActivity();
-      if (activity.isIdle || activity.state === 'away') {
-        debugLog('[Screenshot] System is idle/away, skipping screenshot');
+      // Only skip when the system is genuinely hardware-idle (no keyboard/mouse input).
+      // Do NOT skip for 'away' state — that just means active-win failed to detect
+      // the foreground window, which happens on many Windows configs. We still want
+      // to capture the screen so monitoring data is complete.
+      if (activity.isIdle) {
+        debugLog('[Screenshot] System is idle, skipping screenshot');
         return;
       }
 
@@ -96,6 +118,7 @@ export function startScreenshotService() {
       }
 
       pendingScreenshots.push({
+        employee_id: currentEmployeeId,
         app_name: activity.activeWindow.appName,
         captured_at: now.toISOString(),
         screenshot_data: screenshotData,
@@ -115,8 +138,11 @@ export function startScreenshotService() {
   // Trigger one screenshot shortly after startup (e.g. 5 seconds) to verify it works
   setTimeout(async () => {
     try {
+      if (!currentEmployeeId) return; // Skip initial screenshot if nobody is logged in yet
+
       const activity = getCurrentActivity();
-      if (activity.isIdle || activity.state === 'away') return;
+      // Same rule: only skip on genuine hardware idle, not on 'away' state.
+      if (activity.isIdle) return;
 
       const now = new Date();
       const filename = `screenshot_init_${now.getTime()}.jpg`;
@@ -147,6 +173,7 @@ export function startScreenshotService() {
       }
 
       pendingScreenshots.push({
+        employee_id: currentEmployeeId,
         app_name: activity.activeWindow.appName,
         captured_at: now.toISOString(),
         screenshot_data: screenshotData,
@@ -159,7 +186,7 @@ export function startScreenshotService() {
   }, 5000);
 
   debugLog(`[Screenshot] Service started with interval: ${currentIntervalMinutes}m`);
-  
+
   // Cleanup old synced screenshots every 24 hours
   setInterval(() => {
     cleanupSyncedScreenshots();

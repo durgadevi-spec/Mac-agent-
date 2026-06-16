@@ -64,17 +64,17 @@ export default function App() {
       eApi.onSessionRestored?.(async (cached: any) => {
         const todayStr = new Date().toISOString().slice(0, 10);
         if (cached?.employee && cached?.session && cached?.screen === 'timer' && cached.session.session_date === todayStr) {
-          
+
           let latestSession = cached.session;
           try {
-             // Fetch the most recent session seconds from DB in case they shut down abruptly
-             const { data } = await supabase.from('work_sessions').select('*').eq('id', cached.session.id).single();
-             if (data) {
-                 latestSession = data;
-                 eApi.saveSessionCache?.({ ...cached, session: latestSession, savedAt: new Date().toISOString() });
-             }
+            // Fetch the most recent session seconds from DB in case they shut down abruptly
+            const { data } = await supabase.from('work_sessions').select('*').eq('id', cached.session.id).single();
+            if (data) {
+              latestSession = data;
+              eApi.saveSessionCache?.({ ...cached, session: latestSession, savedAt: new Date().toISOString() });
+            }
           } catch (e) {
-             console.error('Failed to fetch latest session from DB', e);
+            console.error('Failed to fetch latest session from DB', e);
           }
 
           // If started_work_time is missing, set it to session creation time (not current time)
@@ -114,17 +114,17 @@ export default function App() {
           setPlanSubmitted(true);
           setSummarySubmitted(true);
           setPunchConfirmed(true);
-          
+
           if (!window.location.hash.startsWith('#/idle-prompt')) {
             setScreen('timer');
-            
+
             activitySyncService.setEmployeeId(cached.employee.id);
             activitySyncService.startSyncingData(30000);
-            
+
             if (cached.employee.employee_code) {
               eApi.startTimesheetPoller?.(cached.employee.employee_code);
             }
-            
+
             // Restore counters in Electron activity monitor only if they aren't already running
             const currentActivity = await eApi.getLatestActivity?.();
             if (!currentActivity || currentActivity.sessionSeconds === 0) {
@@ -145,7 +145,7 @@ export default function App() {
             eApi.startTracking?.();
           }
         } else if (cached) {
-           eApi.clearSessionCache?.();
+          eApi.clearSessionCache?.();
         }
       });
 
@@ -155,12 +155,12 @@ export default function App() {
       if (cached?.employee && cached?.session && cached?.screen === 'timer' && cached.session.session_date === todayStr) {
         let latestSession = cached.session;
         try {
-           const { data } = await supabase.from('work_sessions').select('*').eq('id', cached.session.id).single();
-           if (data) {
-               latestSession = data;
-               eApi.saveSessionCache?.({ ...cached, session: latestSession, savedAt: new Date().toISOString() });
-           }
-        } catch (e) {}
+          const { data } = await supabase.from('work_sessions').select('*').eq('id', cached.session.id).single();
+          if (data) {
+            latestSession = data;
+            eApi.saveSessionCache?.({ ...cached, session: latestSession, savedAt: new Date().toISOString() });
+          }
+        } catch (e) { }
 
         // If started_work_time is missing, set it to session creation time (not current time)
         if (!latestSession.started_work_time) {
@@ -198,11 +198,11 @@ export default function App() {
         setPlanSubmitted(true);
         setSummarySubmitted(true);
         setPunchConfirmed(true);
-        
+
         // ONLY set screen to timer and start syncing if we are NOT in the idle-prompt window
         if (!window.location.hash.startsWith('#/idle-prompt')) {
           setScreen('timer');
-          
+
           activitySyncService.setEmployeeId(cached.employee.id);
           activitySyncService.startSyncingData(30000);
 
@@ -210,7 +210,7 @@ export default function App() {
             console.log('[App] Restoring and starting timesheet poller for', cached.employee.employee_code);
             eApi.startTimesheetPoller?.(cached.employee.employee_code);
           }
-          
+
           // Restore counters in Electron activity monitor only if they aren't already running
           const currentActivity = await eApi.getLatestActivity?.();
           if (!currentActivity || currentActivity.sessionSeconds === 0) {
@@ -231,7 +231,7 @@ export default function App() {
           eApi.startTracking?.();
         }
       } else if (cached) {
-         eApi.clearSessionCache?.();
+        eApi.clearSessionCache?.();
       }
     };
     tryRestore();
@@ -342,7 +342,7 @@ export default function App() {
       setScreen('admin');
       return;
     }
-    
+
     activitySyncService.setEmployeeId(emp.id);
 
     setPlanSubmitted(false);
@@ -354,7 +354,7 @@ export default function App() {
     try {
       await api()?.setWindowClosable?.(false);
       await api()?.setWindowMinimizable?.(false);
-    } catch {}
+    } catch { }
 
     setScreen('plan');
   };
@@ -422,6 +422,7 @@ export default function App() {
     setScreen('login');
     setShowWaterReminder(false);
     activitySyncService.stopSyncingData();
+    activitySyncService.setEmployeeId(''); // Clears currentEmployeeId from background service
 
     // Clear persisted session and hide floating timer
     const eApi = api();
@@ -486,9 +487,9 @@ export default function App() {
   return (
     <>
       {timesheetReminderDate && !timesheetLockedDate && (
-        <TimesheetReminderModal 
-          date={timesheetReminderDate} 
-          onDismiss={() => setTimesheetReminderDate(null)} 
+        <TimesheetReminderModal
+          date={timesheetReminderDate}
+          onDismiss={() => setTimesheetReminderDate(null)}
         />
       )}
     </>

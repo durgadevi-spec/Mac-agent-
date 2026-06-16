@@ -20,17 +20,8 @@ class ActivitySyncService {
   private syncInterval: NodeJS.Timeout | null = null;
   private isSyncing: boolean = false;
   private employeeId: string = '';
-  private sessionStartTime: number = Date.now();
-  private productiveApps: Set<string> = new Set([
-    'VS Code',
-    'Excel',
-    'Word',
-    'Slack',
-    'Teams',
-    'Gmail',
-    'Chrome',
-    'Firefox',
-  ]);
+
+
 
   constructor() {
     this.initializeSync();
@@ -52,17 +43,20 @@ class ActivitySyncService {
   setEmployeeId(id: string) {
     this.employeeId = id;
     if (typeof window !== 'undefined') {
-      localStorage.setItem('employeeId', id);
+      if (id) {
+        localStorage.setItem('employeeId', id);
+      } else {
+        localStorage.removeItem('employeeId');
+      }
+
+      const api = (window as any).electronAPI;
+      if (api?.setCurrentEmployee) {
+        api.setCurrentEmployee(id || null).catch(console.error);
+      }
     }
   }
 
-  private calculateProductivity(currentApp: string): number {
-    // Simple heuristic: productive apps get 80-100%, others get 20-60%
-    if (this.productiveApps.has(currentApp)) {
-      return 80 + Math.random() * 20;
-    }
-    return 20 + Math.random() * 40;
-  }
+
 
   async startSyncingData(intervalMs: number = 30000) {
     if (this.syncInterval) {
@@ -169,6 +163,7 @@ class ActivitySyncService {
           duration_seconds: log.durationSeconds,
         })),
         screenshots: localScreenshots.map(s => ({
+          employee_id: s.employee_id,
           app_name: s.app_name,
           captured_at: s.captured_at,
           screenshot_data: s.screenshot_data,
@@ -195,7 +190,7 @@ class ActivitySyncService {
     try {
       const session = await getTodaySession(data.employee_id);
       sessionId = session?.id ?? null;
-      
+
       // Only sync metrics if we have a valid session (not a fallback local one)
       if (sessionId && !sessionId.startsWith('session-')) {
         await syncSessionMetrics(sessionId, data.active_time, data.idle_time, data.productive_time);
@@ -238,9 +233,15 @@ class ActivitySyncService {
       }
       for (const scr of data.screenshots) {
         try {
+          const targetEmployeeId = scr.employee_id || data.employee_id;
+          if (!targetEmployeeId) {
+            console.warn(`[Sync] ✗ Skipping screenshot upload for ${scr.app_name}: No employee_id found.`);
+            continue;
+          }
+
           console.log(`[Sync] Uploading screenshot: app=${scr.app_name}, time=${scr.captured_at}, dataSize=${scr.screenshot_data ? Math.round(scr.screenshot_data.length / 1024) + 'KB' : 'missing'}`);
           const result = await createScreenshot({
-            employee_id: data.employee_id,
+            employee_id: targetEmployeeId,
             session_id: sessionId,
             screenshot_data: scr.screenshot_data,
             app_name: scr.app_name,
@@ -272,13 +273,13 @@ class ActivitySyncService {
       );
 
       console.log(`[Sync] Processing ${newLogs.length} new activity logs for upload (including ${newLogs.filter(l => l.duration_seconds === 0).length} incomplete activities)`);
-      
+
       for (const log of newLogs) {
         // Log website information when available for Chrome
         if (log.app_name && (log.app_name.toLowerCase().includes('chrome') || log.app_name.toLowerCase().includes('edge') || log.app_name.toLowerCase().includes('firefox'))) {
           console.log(`[Sync] 🌐 Browser Activity: ${log.app_name} | Website: ${log.website || '(no website)'} | Title: ${log.window_title}`);
         }
-        
+
         // Only sync if we have a duration or if it's from within the last sync interval
         // This prevents syncing activities that are too old but not completed
         if (log.duration_seconds > 0 || (Date.now() - new Date(log.timestamp).getTime()) < 60000) {

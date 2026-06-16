@@ -20,7 +20,7 @@ function initializeEnvironment() {
   console.log('app.getAppPath():', app.getAppPath?.());
   console.log('process.env.TIMESHEET_DB_URL (before dotenv):', process.env.TIMESHEET_DB_URL ? '(SET)' : '(UNDEFINED)');
   console.log('ENV FILE EXISTS checks:');
-  
+
   const resourcesPath = (process as any).resourcesPath;
   const dotenvCandidates = [
     // Packaged app: resources root (PRIMARY for packaged)
@@ -53,7 +53,7 @@ function initializeEnvironment() {
         console.log(`[TimesheetDB] ✓ Loaded .env from: ${dotenvPath}`);
         console.log('[TimesheetDB] dotenv result:', result);
         if (result.error) console.warn('[TimesheetDB] Warning:', result.error);
-        
+
         // Log immediately after loading
         console.log('\n=== AFTER dotenv.config() ===');
         console.log('process.env.TIMESHEET_DB_URL:', process.env.TIMESHEET_DB_URL ? '(SET, length: ' + process.env.TIMESHEET_DB_URL.length + ')' : '(UNDEFINED)');
@@ -66,14 +66,14 @@ function initializeEnvironment() {
           console.log('  (No TIMESHEET or DATABASE keys found)');
         }
         console.log('===\n');
-        
+
         return true;
       }
     } catch (err) {
       console.warn('[TimesheetDB] Error at', dotenvPath, ':', (err as any).message);
     }
   }
-  
+
   // If .env not found in standard locations, try loading from app.getPath('userData')
   try {
     const userDataEnvPath = path.join(app.getPath('userData'), '.env');
@@ -89,7 +89,7 @@ function initializeEnvironment() {
   } catch (err) {
     console.warn('[TimesheetDB] Error loading from userData:', (err as any).message);
   }
-  
+
   console.warn('[TimesheetDB] ⚠ No .env file found in any location');
   console.log('===\n');
   return false;
@@ -112,7 +112,7 @@ if (!envInitialized || !process.env.TIMESHEET_DB_URL) {
       path.join((process as any).resourcesPath || '', '.env'),
       path.join((process as any).resourcesPath || '', 'app', '.env'),
     ];
-    
+
     let sourceEnvPath: string | null = null;
     for (const p of possibleEnvPaths) {
       if (fs.existsSync(p)) {
@@ -121,13 +121,13 @@ if (!envInitialized || !process.env.TIMESHEET_DB_URL) {
         break;
       }
     }
-    
+
     if (sourceEnvPath) {
       const userDataPath = app.getPath('userData');
       const destEnvPath = path.join(userDataPath, '.env');
       console.log('[TimesheetDB] Copying .env from', sourceEnvPath, 'to', destEnvPath);
       fs.copyFileSync(sourceEnvPath, destEnvPath);
-      
+
       // Now try loading from userData
       const result = dotenv.config({ path: destEnvPath });
       console.log('[TimesheetDB] Recovery: Loaded .env from', destEnvPath);
@@ -178,6 +178,7 @@ import {
   stopScreenshotService,
   getRecentScreenshots,
   updateScreenshotSettings,
+  setCurrentEmployeeId,
 } from './screenshotService.js';
 import { startDailyScheduler, stopDailyScheduler, triggerDailySummaryEmails } from './dailyScheduler.js';
 import { startTimesheetEnforcer, stopTimesheetEnforcer, checkTimesheetSubmitted, getPreviousWorkingDate, setTimesheetDbUrlGetter, getComplianceDetails } from './timesheetEnforcer.js';
@@ -237,7 +238,7 @@ function registerWindowsStartup() {
     try {
       const regValue = `"${process.execPath}"`;
       execSync(`reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "Knockturn Agent" /t REG_SZ /d "${regValue}" /f`, { stdio: 'ignore' });
-      
+
       // Also keep the Electron built-in login item just as a secondary safety net
       app.setLoginItemSettings({
         openAtLogin: true,
@@ -300,9 +301,9 @@ async function createWindow() {
     height: 820,
     fullscreen: false,
     show: false,
-    minimizable: false,
-    maximizable: false,
-    closable: false,
+    minimizable: true,
+    maximizable: true,
+    closable: true,
     skipTaskbar: false,
     frame: true,
     titleBarStyle: 'default',
@@ -404,9 +405,18 @@ async function createWindow() {
   });
 
   // Minimise to tray instead of taskbar
-  mainWindow.on('minimize', () => {
-    if (!windowLocked) {
-      mainWindow?.hide();
+  mainWindow.on('minimize', (event: any) => {
+    if (process.platform === 'darwin') {
+      mainWindow?.restore();
+      if (!windowLocked) {
+        mainWindow?.hide();
+      } else {
+        mainWindow?.focus();
+      }
+    } else {
+      if (!windowLocked) {
+        mainWindow?.hide();
+      }
     }
   });
 
@@ -549,39 +559,6 @@ function stopFloatingTimerUpdates() {
   }
 }
 
-// ─── Mac Permissions Check ───────────────────────────────────────────────────────
-async function checkMacPermissions() {
-  if (process.platform !== 'darwin') return;
-  const { systemPreferences, dialog } = require('electron');
-
-  // Check Accessibility
-  const isTrusted = systemPreferences.isTrustedAccessibilityClient(false);
-  if (!isTrusted) {
-    console.log('[Mac Permissions] Requesting Accessibility access...');
-    // Requesting it with true will show the system prompt
-    systemPreferences.isTrustedAccessibilityClient(true);
-    
-    dialog.showMessageBox({
-      type: 'warning',
-      title: 'Accessibility Permission Required',
-      message: 'Knockturn Agent needs Accessibility permissions to track active application names.\n\nPlease enable it in System Settings -> Privacy & Security -> Accessibility, then restart the app.',
-      buttons: ['OK']
-    });
-  }
-
-  // Check Screen Recording
-  const screenStatus = systemPreferences.getMediaAccessStatus('screen');
-  if (screenStatus !== 'granted') {
-    console.log(`[Mac Permissions] Screen recording status is: ${screenStatus}`);
-    dialog.showMessageBox({
-      type: 'warning',
-      title: 'Screen Recording Permission Required',
-      message: 'Knockturn Agent needs Screen Recording permissions to capture screenshots of your activity.\n\nPlease enable it in System Settings -> Privacy & Security -> Screen Recording, then restart the app.',
-      buttons: ['OK']
-    });
-  }
-}
-
 // ─── App ready ────────────────────────────────────────────────────────────────
 app.on('ready', async () => {
   if (!gotLock) return;
@@ -592,9 +569,6 @@ app.on('ready', async () => {
 
   // Initialize timesheet enforcer with URL getter
   setTimesheetDbUrlGetter(getTimesheetDbUrl);
-
-  // Check macOS permissions
-  checkMacPermissions();
 
   await createWindow();
 
@@ -616,7 +590,7 @@ app.on('ready', async () => {
   startDailyScheduler();
 
   if (mainWindow) {
-    mainWindow.webContents.session.preconnect({ url: 'https://qdqypcwnrbdgqagfdeun.supabase.co' });
+    mainWindow.webContents.session.preconnect({ url: 'https://ogqmojvzeyasqoqhkpuz.supabase.co' });
   }
 });
 
@@ -715,13 +689,23 @@ ipcMain.handle('initialize-session-counters', async (_, active: number, idle: nu
 });
 
 ipcMain.handle('get-recent-screenshots', async () => {
-  try { 
+  try {
     const shots = getRecentScreenshots();
     console.log('[IPC] get-recent-screenshots handler called - returning:', shots.length, 'screenshots');
     return shots;
   } catch (err) {
     console.error('[IPC] Error in get-recent-screenshots:', err);
     return [];
+  }
+});
+
+ipcMain.handle('set-current-employee', async (_, employeeId: string | null) => {
+  try {
+    setCurrentEmployeeId(employeeId);
+    return true;
+  } catch (e) {
+    console.error('[IPC] Failed to set current employee ID for screenshots:', e);
+    return false;
   }
 });
 
@@ -839,8 +823,12 @@ ipcMain.handle('set-window-minimizable', async (_, minimizable: boolean) => {
   try {
     if (mainWindow) {
       mainWindow.setMinimizable(minimizable);
+      mainWindow.setMaximizable(minimizable);
       if (!minimizable) { mainWindow.show(); mainWindow.focus(); }
       windowLocked = !(mainWindow.isClosable() && mainWindow.isMinimizable());
+      if (process.platform === 'darwin') {
+        mainWindow.setWindowButtonVisibility(!windowLocked);
+      }
     }
     return true;
   } catch { return false; }
@@ -851,6 +839,9 @@ ipcMain.handle('set-window-closable', async (_, closable: boolean) => {
     if (mainWindow) {
       mainWindow.setClosable(closable);
       windowLocked = !(mainWindow.isClosable() && mainWindow.isMinimizable());
+      if (process.platform === 'darwin') {
+        mainWindow.setWindowButtonVisibility(!windowLocked);
+      }
       if (!closable) { mainWindow.show(); mainWindow.focus(); }
     }
     return true;
@@ -928,7 +919,7 @@ ipcMain.handle('check-timesheets-submitted-batch', async (_, employeeCodes: stri
     return { results };
   } catch (error) {
     console.error('[TimesheetIPC] check-timesheets-submitted-batch failed:', error);
-    try { await client.end(); } catch {}
+    try { await client.end(); } catch { }
     return { results: {} };
   }
 });
@@ -977,7 +968,7 @@ ipcMain.handle('open-timesheet-browser', async () => {
         contextIsolation: true
       }
     });
-    
+
     // Position it slightly off-center if there's a main window so it feels like a modal overlay
     if (mainWindow) {
       const parentBounds = mainWindow.getBounds();
@@ -987,6 +978,7 @@ ipcMain.handle('open-timesheet-browser', async () => {
     }
 
     timesheetWin.loadURL(timesheetUrl);
+    timesheetWin.maximize();
     return true;
   } catch (error) {
     console.error('[TimesheetIPC] open-timesheet-browser failed:', error);
@@ -1053,7 +1045,7 @@ ipcMain.handle('debug-env', async () => {
   console.log('isDev:', isDev);
   console.log('app.isPackaged:', app.isPackaged);
   console.log('===\n');
-  
+
   return {
     cwd: process.cwd(),
     dirname: __dirname,
@@ -1072,12 +1064,12 @@ ipcMain.handle('debug-env', async () => {
 // Check external timesheet DB for plan submission
 ipcMain.handle('check-timesheet-db', async (_, employeeCode) => {
   const timesheetDbUrl = getTimesheetDbUrl();
-  
+
   console.log('\n[TimesheetDB] check-timesheet-db called for:', employeeCode);
   console.log('[TimesheetDB] URL configured:', !!timesheetDbUrl);
   console.log('[TimesheetDB] process.env.TIMESHEET_DB_URL:', process.env.TIMESHEET_DB_URL ? 'YES (length: ' + process.env.TIMESHEET_DB_URL.length + ')' : 'NO');
   console.log('[TimesheetDB] getTimesheetDbUrl() result:', timesheetDbUrl ? 'YES (length: ' + timesheetDbUrl.length + ')' : 'NO');
-  
+
   if (!timesheetDbUrl) {
     console.error('[TimesheetDB] ✗ TIMESHEET_DB_URL is not configured');
     return false;
@@ -1096,7 +1088,7 @@ ipcMain.handle('check-timesheet-db', async (_, employeeCode) => {
     // Try multiple possible employee code column names
     const empCols = ['employee_code', 'emp_code', 'empid'];
     let employeeId: string | null = null;
-    
+
     for (const col of empCols) {
       try {
         const res = await client.query(`SELECT id FROM employees WHERE ${col} = $1 LIMIT 1`, [employeeCode]);
@@ -1160,7 +1152,7 @@ ipcMain.handle('check-timesheet-db', async (_, employeeCode) => {
     return false;
   } catch (error) {
     console.error('[TimesheetDB] ✗ Error checking timesheet DB:', error);
-    try { await client.end(); } catch (e) {}
+    try { await client.end(); } catch (e) { }
     return false;
   }
 });
@@ -1266,13 +1258,13 @@ ipcMain.handle('check-timesheet-db-debug', async (_, employeeCode) => {
       daily_submissions: result.details.daily_submissions,
       time_entries: result.details.time_entries
     });
-    
+
     await client.end();
     return result;
   } catch (error) {
     result.errors.push('fatal: ' + ((error as any).message || error));
     console.error('[TimesheetDB DEBUG] Fatal error:', error);
-    try { await client.end(); } catch (e) {}
+    try { await client.end(); } catch (e) { }
     return result;
   }
 });

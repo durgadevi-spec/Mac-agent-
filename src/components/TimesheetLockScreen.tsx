@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { AlertTriangle, ExternalLink, CheckCircle, RefreshCw } from 'lucide-react';
 import { Employee } from '../lib/supabase';
 

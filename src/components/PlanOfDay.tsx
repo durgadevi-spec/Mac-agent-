@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ClipboardList, ExternalLink, Lock } from 'lucide-react';
-import { Employee, WorkSession, getTodaySession, punchInSession, markPlanAsSubmitted } from '../lib/supabase';
+import { ArrowLeft, ClipboardList, ExternalLink } from 'lucide-react';
+import { Employee, WorkSession, getTodaySession, markPlanAsSubmitted } from '../lib/supabase';
 import WindowControls from './WindowControls';
 
 type PlanPhase = 'form' | 'summary' | 'punch' | 'punch_no';

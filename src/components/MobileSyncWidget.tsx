@@ -3,9 +3,7 @@ import {
   Phone,
   PhoneOff,
   PhoneIncoming,
-  Clock,
   MapPin,
-  TrendingUp,
 } from 'lucide-react';
 import {
   getTodayCallLogs,

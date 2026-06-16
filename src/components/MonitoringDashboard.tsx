@@ -5,7 +5,6 @@ import {
   Clock,
   AlertCircle,
   Eye,
-  LogOut,
   Zap,
   PhoneIncoming,
   Phone,
@@ -22,6 +21,7 @@ import {
   WorkSession,
   TimesheetLockLog,
   IdleAlert,
+  getEmployeeScreenshotsByDate,
 } from '../lib/supabase';
 import {
   getCallLogsByDate,
@@ -114,33 +114,33 @@ const ScreenshotCard: React.FC<ScreenshotCardProps> = ({ shot }) => {
 /* ─── Status helpers ────────────────────────────────────────────── */
 const statusDot: Record<string, string> = {
   online: 'bg-emerald-400',
-  idle:   'bg-amber-400',
-  away:   'bg-orange-400',
-  offline:'bg-slate-300',
+  idle: 'bg-amber-400',
+  away: 'bg-orange-400',
+  offline: 'bg-slate-300',
 };
 const statusBadge: Record<string, string> = {
   online: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
-  idle:   'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
-  away:   'bg-orange-50 text-orange-700 ring-1 ring-orange-200',
-  offline:'bg-slate-100 text-slate-500 ring-1 ring-slate-200',
+  idle: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
+  away: 'bg-orange-50 text-orange-700 ring-1 ring-orange-200',
+  offline: 'bg-slate-100 text-slate-500 ring-1 ring-slate-200',
 };
 const avatarColor: Record<string, string> = {
   online: 'bg-emerald-100 text-emerald-700',
-  idle:   'bg-amber-100 text-amber-700',
-  away:   'bg-orange-100 text-orange-700',
-  offline:'bg-slate-100 text-slate-500',
+  idle: 'bg-amber-100 text-amber-700',
+  away: 'bg-orange-100 text-orange-700',
+  offline: 'bg-slate-100 text-slate-500',
 };
 const metricColor: Record<string, string> = {
-  active:      'text-blue-600',
-  productive:  'text-emerald-600',
-  nonproductive:'text-rose-500',
-  idle:        'text-amber-500',
-  away:        'text-orange-500',
-  productivity:'text-violet-600',
+  active: 'text-blue-600',
+  productive: 'text-emerald-600',
+  nonproductive: 'text-rose-500',
+  idle: 'text-amber-500',
+  away: 'text-orange-500',
+  productivity: 'text-violet-600',
 };
 
 /* ─── Stat card ─────────────────────────────────────────────────── */
-const StatCard: React.FC<{ label: string; value: string | number; color: string; icon: React.ReactNode }> = ({
+/* const StatCard: React.FC<{ label: string; value: string | number; color: string; icon: React.ReactNode }> = ({
   label, value, color, icon,
 }) => (
   <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3">
@@ -152,7 +152,7 @@ const StatCard: React.FC<{ label: string; value: string | number; color: string;
       <p className={`text-xl font-bold mt-1 leading-none ${color}`}>{value}</p>
     </div>
   </div>
-);
+); */
 
 /* ─── Metric pill ───────────────────────────────────────────────── */
 const MetricPill: React.FC<{ label: string; value: string; colorClass: string }> = ({ label, value, colorClass }) => (
@@ -232,12 +232,12 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
       const employeeActivityCount = new Map<string, number>();
       const employeeLastActive = new Map<string, string>();
       const employeeLastIdleReason = new Map<string, string>();
-      
+
       rawActivityLogs.forEach((log) => {
         employeeActivityCount.set(log.employee_id, (employeeActivityCount.get(log.employee_id) || 0) + 1);
         const cur = employeeLastActive.get(log.employee_id);
         if (!cur || log.logged_at > cur) employeeLastActive.set(log.employee_id, log.logged_at);
-        
+
         if (log.activity_type === 'idle_reason' && log.idle_reason) {
           const curIdle = employeeLastIdleReason.get(log.employee_id + '_time');
           if (!curIdle || log.logged_at > curIdle) {
@@ -251,7 +251,7 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
         const empSessions = employeeMap.get(emp.id) || [];
         // Use the last session for general activity checks, but find the earliest login moment
         const latestSession = empSessions.length > 0 ? empSessions[empSessions.length - 1] : null;
-        
+
         let firstLoginTime: string | null = null;
         for (const s of empSessions) {
           const candidate = s.punch_in_time || s.started_work_time || s.created_at;
@@ -267,29 +267,29 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
         const maxProductive = Math.max(0, ...empSessions.map(s => s.productive_seconds || 0));
         const hasActivity = maxActive > 0 || maxProductive > 0;
         const hasActivityLogs = activityCount > 0;
-        
+
         const hasPunchIn = firstLoginTime && latestSession && !latestSession.day_finished;
         const isRecentPunchIn = hasPunchIn && firstLoginTime
           ? (Date.now() - new Date(firstLoginTime).getTime()) < 3600000
           : false;
-        
+
         const hasAnyActivity = hasActivity || hasActivityLogs;
         const lastActiveTime = employeeLastActive.get(emp.id);
         const lastActive = lastActiveTime
           ? new Date(lastActiveTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           : 'N/A';
 
-        const isOffline = lastActiveTime 
+        const isOffline = lastActiveTime
           ? (Date.now() - new Date(lastActiveTime).getTime()) > 5 * 60 * 1000 // 5 mins
           : false;
 
         const status: EmployeeOverview['status'] = (!latestSession || latestSession.day_finished)
           ? 'offline'
           : isOffline
-          ? 'offline'
-          : (hasAnyActivity || isRecentPunchIn)
-          ? 'online'
-          : 'idle';
+            ? 'offline'
+            : (hasAnyActivity || isRecentPunchIn)
+              ? 'online'
+              : 'idle';
 
         return {
           id: emp.id,
@@ -373,7 +373,7 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
     if (!employeeSessions.length) { setSelectedSession(null); return; }
     const firstSession = employeeSessions.reduce((earliest, current) => {
       const et = earliest.punch_in_time ? new Date(earliest.punch_in_time).getTime() : Infinity;
-      const ct = current.punch_in_time  ? new Date(current.punch_in_time).getTime()  : Infinity;
+      const ct = current.punch_in_time ? new Date(current.punch_in_time).getTime() : Infinity;
       if (et === Infinity) return current;
       if (ct === Infinity) return earliest;
       return ct < et ? current : earliest;
@@ -386,9 +386,9 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
     if (selectedEmployee && employees.length > 0) {
       const updated = employees.find((e) => e.id === selectedEmployee.id);
       if (updated && (
-        updated.lastSync   !== selectedEmployee.lastSync   ||
+        updated.lastSync !== selectedEmployee.lastSync ||
         updated.lastActive !== selectedEmployee.lastActive ||
-        updated.status     !== selectedEmployee.status
+        updated.status !== selectedEmployee.status
       )) setSelectedEmployee(updated);
     }
   }, [employees, selectedEmployee]);
@@ -400,22 +400,22 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
 
     // Immediately compute and apply non-async data so metrics update instantly
     const employeeSessions = sessions.filter((s) => s.employee_id === selectedEmployee.id);
-    const selectedLogs     = activityLogs.filter((l) => l.employee_id === selectedEmployee.id);
-    const currentApp       = selectedLogs.length > 0 ? selectedLogs[0].app_name : 'Unknown';
+    const selectedLogs = activityLogs.filter((l) => l.employee_id === selectedEmployee.id);
+    const currentApp = selectedLogs.length > 0 ? selectedLogs[0].app_name : 'Unknown';
 
     // Calculate max times because the db may have multiple cumulative snapshots per day
-    const productiveTime   = employeeSessions.length > 0 ? Math.max(0, ...employeeSessions.map(s => s.productive_seconds ?? 0)) : 0;
-    const activeTime       = employeeSessions.length > 0 ? Math.max(0, ...employeeSessions.map(s => s.active_seconds ?? 0)) : 0;
-    const idleTime         = employeeSessions.length > 0 ? Math.max(0, ...employeeSessions.map(s => s.idle_seconds ?? 0)) : 0;
-    const productivity     = activeTime > 0 ? Math.round((productiveTime / activeTime) * 100) : 0;
+    const productiveTime = employeeSessions.length > 0 ? Math.max(0, ...employeeSessions.map(s => s.productive_seconds ?? 0)) : 0;
+    const activeTime = employeeSessions.length > 0 ? Math.max(0, ...employeeSessions.map(s => s.active_seconds ?? 0)) : 0;
+    const idleTime = employeeSessions.length > 0 ? Math.max(0, ...employeeSessions.map(s => s.idle_seconds ?? 0)) : 0;
+    const productivity = activeTime > 0 ? Math.round((productiveTime / activeTime) * 100) : 0;
     const sessionStartTime = selectedSession?.started_work_time ?? new Date().toLocaleTimeString();
 
     const buildLogDetails = (log: ActivityLog) => {
       if (log.activity_type === 'idle_reason') return log.idle_reason || 'Idle reason provided';
-      const appName     = log.app_name     || 'Unknown';
+      const appName = log.app_name || 'Unknown';
       const windowTitle = log.window_title || 'No title';
-      const website     = log.website      || '';
-      const isBrowser   = ['chrome','edge','firefox'].some((b) => appName.toLowerCase().includes(b));
+      const website = log.website || '';
+      const isBrowser = ['chrome', 'edge', 'firefox'].some((b) => appName.toLowerCase().includes(b));
       if (isBrowser && website.trim()) {
         let d = `${appName} • ${website}`;
         if (windowTitle && !windowTitle.toLowerCase().includes(website.toLowerCase()) && windowTitle !== 'No title')
@@ -459,7 +459,7 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
         diff = (activeTime + idleTime) * 1000;
       }
       const hours = Math.floor(diff / 3600000);
-      const mins  = Math.floor((diff % 3600000) / 60000);
+      const mins = Math.floor((diff % 3600000) / 60000);
       setSessionDuration(`${hours}h ${mins}m`);
     } else {
       setSessionDuration('0h 0m');
@@ -469,18 +469,18 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
       setScreenshotsLoading(true);
       setScreenshotError('');
       try {
-        const dateString  = format(selectedDate, 'yyyy-MM-dd');
-        
+        const dateString = format(selectedDate, 'yyyy-MM-dd');
+
         const remoteShots = await getEmployeeScreenshotsByDate(selectedEmployee.id, dateString).catch(e => {
           console.error('Error fetching screenshots:', e);
           return [];
         });
-        
+
         const alerts = await fetchIdleAlertsByDate(selectedEmployee.id, dateString).catch(e => {
           console.error('Error fetching idle alerts:', e);
           return [];
         });
-        
+
         setIdleAlerts(alerts);
 
         if (!cancelled) {
@@ -495,8 +495,8 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
             sessionStartTime,
             screenshots: remoteShots.map((s: any) => ({
               timestamp: new Date(s.captured_at).toLocaleTimeString(),
-              url:       normalizeScreenshotUrl(s.screenshot_data),
-              appName:   s.app_name,
+              url: normalizeScreenshotUrl(s.screenshot_data),
+              appName: s.app_name,
             })),
             activityLogs: mappedLogs,
           });
@@ -559,10 +559,10 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
           {/* Status pills */}
           <div className="hidden md:flex items-center gap-2">
             {[
-              { label: 'Online',  count: employees.filter(e => e.status === 'online').length,  dot: 'bg-emerald-400' },
-              { label: 'Idle',    count: employees.filter(e => e.status === 'idle').length,    dot: 'bg-amber-400' },
+              { label: 'Online', count: employees.filter(e => e.status === 'online').length, dot: 'bg-emerald-400' },
+              { label: 'Idle', count: employees.filter(e => e.status === 'idle').length, dot: 'bg-amber-400' },
               { label: 'Offline', count: employees.filter(e => e.status === 'offline').length, dot: 'bg-slate-300' },
-              { label: 'Total',   count: employees.length,                                     dot: 'bg-blue-400' },
+              { label: 'Total', count: employees.length, dot: 'bg-blue-400' },
             ].map(({ label, count, dot }) => (
               <div key={label} className="flex items-center gap-1.5 bg-slate-50 border border-slate-100 rounded-full px-3 py-1 text-xs text-slate-600">
                 <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
@@ -620,11 +620,10 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
                     setSelectedEmployee(emp);
                     setTimeout(() => setTransitioning(false), 120);
                   }}
-                  className={`w-full text-left flex items-center gap-3 px-4 py-3 transition-all border-l-2 ${
-                    selectedEmployee?.id === emp.id
-                      ? 'bg-blue-50 border-l-blue-500'
-                      : 'border-l-transparent hover:bg-slate-50'
-                  }`}
+                  className={`w-full text-left flex items-center gap-3 px-4 py-3 transition-all border-l-2 ${selectedEmployee?.id === emp.id
+                    ? 'bg-blue-50 border-l-blue-500'
+                    : 'border-l-transparent hover:bg-slate-50'
+                    }`}
                 >
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${avatarColor[emp.status]}`}>
                     {emp.name.charAt(0)}
@@ -659,9 +658,8 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
 
         {/* ── Main content ── */}
         <main
-          className={`flex-1 min-w-0 flex flex-col gap-4 transition-all duration-150 ${
-            transitioning ? 'opacity-0 scale-[0.99]' : 'opacity-100 scale-100'
-          }`}
+          className={`flex-1 min-w-0 flex flex-col gap-4 transition-all duration-150 ${transitioning ? 'opacity-0 scale-[0.99]' : 'opacity-100 scale-100'
+            }`}
         >
           {selectedEmployee ? (
             <>
@@ -705,45 +703,45 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
                 <>
                   <div className="grid grid-cols-6 gap-3">
                     {[
-                      { label: 'Active Time',     value: formatTime(activityData.activeTime),       cls: metricColor.active },
-                      { label: 'Productive',      value: formatTime(activityData.productiveTime),   cls: metricColor.productive },
-                      { label: 'Non-Productive',  value: formatTime(activityData.nonproductiveTime),cls: metricColor.nonproductive },
-                      { label: 'Idle Time',       value: formatTime(activityData.idleTime),         cls: metricColor.idle },
-                      { label: 'Away Time',       value: formatTime(activityData.awayTime),         cls: metricColor.away },
-                      { label: 'Productivity',    value: `${activityData.productivity}%`,           cls: metricColor.productivity },
+                      { label: 'Active Time', value: formatTime(activityData.activeTime), cls: metricColor.active },
+                      { label: 'Productive', value: formatTime(activityData.productiveTime), cls: metricColor.productive },
+                      { label: 'Non-Productive', value: formatTime(activityData.nonproductiveTime), cls: metricColor.nonproductive },
+                      { label: 'Idle Time', value: formatTime(activityData.idleTime), cls: metricColor.idle },
+                      { label: 'Away Time', value: formatTime(activityData.awayTime), cls: metricColor.away },
+                      { label: 'Productivity', value: `${activityData.productivity}%`, cls: metricColor.productivity },
                     ].map(({ label, value, cls }) => (
                       <MetricPill key={label} label={label} value={value} colorClass={cls} />
                     ))}
                   </div>
 
                   {/* Summary section */}
-              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-6 py-4">
-                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-3">{summaryTitle}</p>
-                <div className="grid grid-cols-5 gap-4">
-                  {[
-                    {
-                      label: 'First login',
-                      value: selectedSession?.started_work_time
-                        ? new Date(selectedSession.started_work_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                        : 'N/A',
-                    },
-                    { label: 'Last active',    value: selectedEmployee.lastActive || 'N/A' },
-                    { label: 'Total active',   value: formatTime(activityData.activeTime) },
-                    {
-                      label: 'Status',
-                      value: selectedEmployee.status,
-                      valueClass: selectedEmployee.status === 'online' ? 'text-emerald-600' : 'text-slate-500',
-                    },
-                    { label: 'Current app', value: activityData.currentApp },
-                  ].map(({ label, value, valueClass }) => (
-                    <div key={label}>
-                      <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1">{label}</p>
-                      <p className={`text-sm font-semibold capitalize ${valueClass || 'text-slate-800'}`}>{value}</p>
+                  <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-6 py-4">
+                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-3">{summaryTitle}</p>
+                    <div className="grid grid-cols-5 gap-4">
+                      {[
+                        {
+                          label: 'First login',
+                          value: selectedSession?.started_work_time
+                            ? new Date(selectedSession.started_work_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                            : 'N/A',
+                        },
+                        { label: 'Last active', value: selectedEmployee.lastActive || 'N/A' },
+                        { label: 'Total active', value: formatTime(activityData.activeTime) },
+                        {
+                          label: 'Status',
+                          value: selectedEmployee.status,
+                          valueClass: selectedEmployee.status === 'online' ? 'text-emerald-600' : 'text-slate-500',
+                        },
+                        { label: 'Current app', value: activityData.currentApp },
+                      ].map(({ label, value, valueClass }) => (
+                        <div key={label}>
+                          <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1">{label}</p>
+                          <p className={`text-sm font-semibold capitalize ${valueClass || 'text-slate-800'}`}>{value}</p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
-              </>
+                  </div>
+                </>
               )}
 
               {/* Tabs */}
@@ -752,21 +750,20 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
                 {!hideTabs && (
                   <div className="flex border-b border-slate-100 px-2 gap-0">
                     {([
-                      { id: 'activity',     label: 'Activity',      Icon: Activity },
-                      { id: 'applications', label: 'Applications',  Icon: Zap },
-                      { id: 'screenshots',  label: 'Screenshots',   Icon: Eye },
-                      { id: 'alerts',       label: 'Alerts & Warnings',   Icon: AlertCircle },
-                      { id: 'logs',         label: 'Call Logs',     Icon: Phone },
-                      { id: 'locations',    label: 'Locations',     Icon: MapPin },
+                      { id: 'activity', label: 'Activity', Icon: Activity },
+                      { id: 'applications', label: 'Applications', Icon: Zap },
+                      { id: 'screenshots', label: 'Screenshots', Icon: Eye },
+                      { id: 'alerts', label: 'Alerts & Warnings', Icon: AlertCircle },
+                      { id: 'logs', label: 'Call Logs', Icon: Phone },
+                      { id: 'locations', label: 'Locations', Icon: MapPin },
                     ] as const).map(({ id, label, Icon }) => (
                       <button
                         key={id}
                         onClick={() => setActiveTab(id)}
-                        className={`flex items-center gap-1.5 px-4 py-3 text-xs font-semibold border-b-2 transition-all ${
-                          activeTab === id
-                            ? 'text-blue-600 border-blue-500'
-                            : 'text-slate-400 border-transparent hover:text-slate-600 hover:bg-slate-50'
-                        }`}
+                        className={`flex items-center gap-1.5 px-4 py-3 text-xs font-semibold border-b-2 transition-all ${activeTab === id
+                          ? 'text-blue-600 border-blue-500'
+                          : 'text-slate-400 border-transparent hover:text-slate-600 hover:bg-slate-50'
+                          }`}
                       >
                         <Icon className="w-3.5 h-3.5" />
                         {label}
@@ -837,7 +834,7 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
                             }
                           });
                           const sortedApps = Array.from(appUsage.entries()).sort((a, b) => b[1] - a[1]);
-                          
+
                           return (
                             <>
                               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
@@ -932,7 +929,7 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
                                   </span>
                                 </div>
                                 <span className="text-xs font-medium text-slate-400 bg-slate-100 px-2.5 py-1 rounded-full">
-                                  {format(new Date(alert.idle_since), 'h:mm a')}
+                                  {format(new Date(alert.idle_since || alert.created_at || new Date()), 'h:mm a')}
                                 </span>
                               </div>
                               <div className="bg-white border border-slate-100 rounded-xl p-3 shadow-sm">
@@ -950,7 +947,7 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
                           ))}
                         </div>
                       )}
-                      
+
                       {lockLogs.length > 0 && (
                         <div className="px-5 pb-5">
                           <div className="mt-6 pt-6 border-t border-slate-100">
@@ -958,19 +955,16 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
                             <div className="divide-y divide-slate-50">
                               {lockLogs.map((lockLog) => (
                                 <div key={lockLog.id} className="flex gap-3 py-2.5">
-                                  <div className={`w-1.5 h-1.5 rounded-full mt-2 flex-shrink-0 ${
-                                    lockLog.event_type === 'LOCKED' ? 'bg-red-500' :
+                                  <div className={`w-1.5 h-1.5 rounded-full mt-2 flex-shrink-0 ${lockLog.event_type === 'LOCKED' ? 'bg-red-500' :
                                     lockLog.event_type === 'WARNING' ? 'bg-amber-400' : 'bg-blue-400'
-                                  }`} />
+                                    }`} />
                                   <div className="flex-1 min-w-0">
-                                    <p className={`text-xs font-semibold ${
-                                      lockLog.event_type === 'LOCKED' ? 'text-red-800' :
+                                    <p className={`text-xs font-semibold ${lockLog.event_type === 'LOCKED' ? 'text-red-800' :
                                       lockLog.event_type === 'WARNING' ? 'text-amber-800' : 'text-blue-800'
-                                    }`}>
-                                      <span className={`inline-block text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded mr-2 align-middle ${
-                                        lockLog.event_type === 'LOCKED' ? 'bg-red-100 text-red-600' :
-                                        lockLog.event_type === 'WARNING' ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'
                                       }`}>
+                                      <span className={`inline-block text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded mr-2 align-middle ${lockLog.event_type === 'LOCKED' ? 'bg-red-100 text-red-600' :
+                                        lockLog.event_type === 'WARNING' ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'
+                                        }`}>
                                         {lockLog.event_type}
                                       </span>
                                       {lockLog.reason || 'Timesheet Action'}
@@ -1075,9 +1069,9 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
                               </p>
                             </div>
                             <div className="text-right flex-shrink-0">
-                              <a 
-                                href={`https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`} 
-                                target="_blank" 
+                              <a
+                                href={`https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`}
+                                target="_blank"
                                 rel="noreferrer"
                                 className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 transition-colors font-medium"
                               >
