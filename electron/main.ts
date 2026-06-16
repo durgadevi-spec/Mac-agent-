@@ -301,7 +301,7 @@ async function createWindow() {
     fullscreen: false,
     show: false,
     minimizable: false,
-    maximizable: true,
+    maximizable: false,
     closable: false,
     skipTaskbar: false,
     frame: true,
@@ -384,8 +384,9 @@ async function createWindow() {
       clearSessionCache();
     }
 
-    // Always show and bring to front on startup (like TimeChamp)
+    // Always show, maximize, and bring to front on startup
     mainWindow?.show();
+    mainWindow?.maximize();
     mainWindow?.focus();
     // Pop above everything briefly so the user sees the login/plan screen
     mainWindow?.setAlwaysOnTop(true, 'screen-saver');
