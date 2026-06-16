@@ -80,7 +80,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
     }
     setLoading(true);
     try {
-      console.log('[Login] Attempting login for:', employeeCode);
+      console.log(`[Login] Attempting login for: "${employeeCode}" with password: "${password}" (length: ${password.length})`);
       const { employee, error } = await loginEmployee(
         employeeCode,
         employeeName,

@@ -139,6 +139,7 @@ export async function loginEmployee(
   const normalizedName = employeeName.trim();
 
   try {
+    console.log(`[Supabase Debug] Querying employees table for: employee_code="${normalizedCode}", password_hash="${password}"`);
     // Try primary database first
     const { data, error } = await supabase
       .from('employees')
@@ -146,6 +147,8 @@ export async function loginEmployee(
       .eq('employee_code', normalizedCode)
       .eq('password_hash', password)
       .maybeSingle() as { data: Employee | null; error: PostgrestError | null };
+
+    console.log(`[Supabase Debug] employees query result:`, { data, error });
 
     if (error) {
       console.error('Login query error:', error);
