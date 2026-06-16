@@ -81,6 +81,10 @@ class ActivitySyncService {
 
   private async syncActivityData() {
     if (this.isSyncing) return;
+    if (!this.employeeId) {
+      console.log('[Sync] No employee ID set, skipping sync');
+      return;
+    }
 
     this.isSyncing = true;
 

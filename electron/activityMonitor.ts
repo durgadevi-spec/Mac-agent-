@@ -136,14 +136,28 @@ const scptScriptContent = `global frontApp, windowTitle
 set windowTitle to "Unknown"
 tell application "System Events"
     set frontApp to name of first application process whose frontmost is true
-    try
-        tell process frontApp
-            if exists window 1 then
-                set windowTitle to name of window 1
-            end if
-        end tell
-    end try
 end tell
+
+try
+    if frontApp is "Google Chrome" or frontApp is "Brave Browser" or frontApp is "Microsoft Edge" then
+        tell application frontApp
+            set windowTitle to title of active tab of front window
+        end tell
+    else if frontApp is "Safari" then
+        tell application "Safari"
+            set windowTitle to name of front document
+        end tell
+    else
+        tell application "System Events"
+            tell process frontApp
+                if exists window 1 then
+                    set windowTitle to name of window 1
+                end if
+            end tell
+        end tell
+    end if
+end try
+
 return frontApp & "|" & windowTitle`;
 
 function writePsScriptIfNotExist() {
