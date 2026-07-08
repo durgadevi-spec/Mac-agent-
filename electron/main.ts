@@ -404,15 +404,20 @@ async function createWindow() {
     mainWindow = null;
   });
 
-  // Minimise to tray instead of taskbar
+  // Minimise to tray instead of taskbar.
+  //
+  // NOTE: BrowserWindow.setMinimizable(false) is a Windows/Linux-only API in
+  // Electron - it has no effect on macOS, so the native yellow traffic-light
+  // button always stays clickable there. The only reliable cross-platform way
+  // to stop macOS from minimizing is to catch the 'minimize' event after the
+  // fact and immediately restore/refocus the window. This agent never needs
+  // to be minimized on macOS, so we always cancel it there (not just while
+  // "locked").
   mainWindow.on('minimize', (event: any) => {
     if (process.platform === 'darwin') {
       mainWindow?.restore();
-      if (!windowLocked) {
-        mainWindow?.hide();
-      } else {
-        mainWindow?.focus();
-      }
+      mainWindow?.show();
+      mainWindow?.focus();
     } else {
       if (!windowLocked) {
         mainWindow?.hide();
@@ -991,6 +996,25 @@ ipcMain.handle('lock-system', async () => {
     if (process.platform === 'win32') {
       execSync('rundll32.exe user32.dll,LockWorkStation');
       return true;
+    }
+    if (process.platform === 'darwin') {
+      // Triggers the same "lock screen" action as Control+Command+Q.
+      // CGSession -suspend is the standard command-line way to lock a Mac.
+      try {
+        execSync(
+          '/System/Library/CoreServices/Menu\\ Extras/User.menu/Contents/Resources/CGSession -suspend'
+        );
+        return true;
+      } catch (primaryErr) {
+        // Fallback for macOS versions where the CGSession helper has moved/been removed.
+        try {
+          execSync(`osascript -e 'tell application "System Events" to keystroke "q" using {control down, command down}'`);
+          return true;
+        } catch (fallbackErr) {
+          console.error('[TimesheetIPC] macOS lock-system fallback also failed:', fallbackErr);
+          throw primaryErr;
+        }
+      }
     }
     console.warn('[TimesheetIPC] lock-system is not implemented for platform:', process.platform);
     return false;

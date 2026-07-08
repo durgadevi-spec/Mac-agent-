@@ -179,6 +179,10 @@ function writePsScriptIfNotExist() {
 let _macFallbackTs = 0;
 let _macFallbackCache: { ownerName: string; windowTitle: string } = { ownerName: 'Unknown', windowTitle: 'Unknown' };
 
+// Tracks whether we've already warned about missing macOS permissions this run,
+// so we don't spam the log every second.
+let _macPermissionWarned = false;
+
 function getWindowViaMacFallback(): { ownerName: string; windowTitle: string } {
   const now = Date.now();
   if (now - _macFallbackTs < 1000) return _macFallbackCache;
@@ -191,8 +195,27 @@ function getWindowViaMacFallback(): { ownerName: string; windowTitle: string } {
         ownerName: raw.slice(0, sep).trim(),
         windowTitle: raw.slice(sep + 1).trim(),
       };
+    } else if (raw) {
+      console.warn('[Monitor] osascript returned unexpected output:', raw);
     }
-  } catch {
+  } catch (err: any) {
+    // errAEEventNotPermitted (-1743) / errAEAccessDenied (-1744) mean the user
+    // has not granted Automation permission for this app to control
+    // "System Events" (and Chrome/Safari) under System Settings > Privacy &
+    // Security > Automation. That's the #1 cause of activity logs showing
+    // "Unknown / Unknown" on macOS, so log it loudly (once) instead of
+    // silently keeping stale cached values forever.
+    const message = String(err?.stderr || err?.message || err);
+    if (!_macPermissionWarned) {
+      _macPermissionWarned = true;
+      console.error(
+        '[Monitor] macOS window detection failed. If this mentions "not allowed assistive access" ' +
+        'or "not authorized to send Apple events", grant this app permission under ' +
+        'System Settings > Privacy & Security > Automation (allow control of "System Events", ' +
+        '"Google Chrome", and "Safari"), and also enable it under ' +
+        'System Settings > Privacy & Security > Accessibility. Underlying error: ' + message
+      );
+    }
     // keep cached values
   }
   return _macFallbackCache;
@@ -453,7 +476,12 @@ async function refreshActivity() {
         windowTitle = active.title || 'Unknown';
       }
     } catch (err) {
-      console.warn('[Monitor] active-win failed, using PowerShell fallback');
+      const fallbackName = process.platform === 'darwin' ? 'AppleScript' : 'PowerShell';
+      console.warn(`[Monitor] active-win failed, using ${fallbackName} fallback:`, String((err as any)?.message || err));
+      if (process.platform === 'darwin') {
+        console.warn('[Monitor] On macOS, active-win requires Screen Recording permission: ' +
+          'System Settings > Privacy & Security > Screen Recording.');
+      }
     }
 
     // Fallback: PowerShell Win32 API / AppleScript macOS

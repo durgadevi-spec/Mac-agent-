@@ -2,9 +2,21 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <!--
+    IMPORTANT: This app is distributed outside the Mac App Store (DMG), so it must
+    NOT be sandboxed. App Sandbox blocks exactly the things this agent needs to do:
+    reading other apps' window titles via System Events/AppleScript, capturing the
+    screen via `screencapture`, and spawning helper child processes. Leaving sandbox
+    enabled is why activity logs show "Unknown/Unknown" and screenshots fail to
+    capture on macOS. Only re-enable this if this build is ever submitted to the
+    Mac App Store (mas target) - and if so, cross-app monitoring will need to be
+    reworked, as it's not compatible with a sandboxed MAS app.
+  -->
   <key>com.apple.security.app-sandbox</key>
+  <false/>
+  <key>com.apple.security.cs.allow-jit</key>
   <true/>
-  <key>com.apple.security.automation.enabled</key>
+  <key>com.apple.security.cs.disable-library-validation</key>
   <true/>
   <key>com.apple.security.files.user-selected.read-write</key>
   <true/>
@@ -16,7 +28,7 @@
   <true/>
   <key>com.apple.security.network.server</key>
   <true/>
-  <key>com.apple.security.scripting-targets</key>
+  <key>com.apple.security.automation.apple-events</key>
   <true/>
 </dict>
 </plist>
