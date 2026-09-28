@@ -25,7 +25,7 @@ interface ActivityLogEntry {
   appName: string;
   windowTitle: string;
   website?: string;
-  type: 'app' | 'idle' | 'away' | 'idle_reason';
+  type: 'app' | 'idle' | 'away' | 'unknown' | 'idle_reason';
   productive: boolean;
   startTime: string;
   endTime?: string;
@@ -254,7 +254,7 @@ export default function TimerScreen({ employee, session, showWaterReminder, onDi
             appName: log.app_name || 'Unknown',
             windowTitle: log.window_title || 'No title',
             website: log.website || '',
-            type: log.activity_type as 'app' | 'idle' | 'away',
+            type: log.activity_type as 'app' | 'idle' | 'away' | 'unknown',
             productive: log.productive || false,
             startTime: log.logged_at,
             durationSeconds: log.duration_seconds || 0
@@ -494,7 +494,7 @@ export default function TimerScreen({ employee, session, showWaterReminder, onDi
                   ) : (
                     displayLogs.filter(log => log.type !== 'idle_reason').map((log, i) => (
                       <div key={i} className="flex items-center gap-3 px-3 py-2.5 hover:bg-pink-50/40 transition rounded-lg">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${log.productive ? 'bg-emerald-50' : log.type === 'idle' ? 'bg-amber-50' : 'bg-rose-50'}`}>
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${log.productive ? 'bg-emerald-50' : log.type === 'idle' ? 'bg-amber-50' : log.type === 'unknown' ? 'bg-slate-50' : 'bg-rose-50'}`}>
                           <AppIcon appName={log.appName} size="w-4 h-4" />
                         </div>
                         <div className="flex-1 min-w-0">
@@ -503,11 +503,11 @@ export default function TimerScreen({ employee, session, showWaterReminder, onDi
                         </div>
                         <div className="text-right shrink-0">
                           <p className="text-xs text-gray-500">{formatLogTime(log.startTime)}</p>
-                          <p className={`text-xs font-semibold ${log.productive ? 'text-emerald-500' : log.type === 'idle' ? 'text-amber-500' : 'text-rose-400'}`}>
+                          <p className={`text-xs font-semibold ${log.productive ? 'text-emerald-500' : log.type === 'idle' ? 'text-amber-500' : log.type === 'unknown' ? 'text-slate-400' : 'text-rose-400'}`}>
                             {log.durationSeconds > 0 ? formatDuration(log.durationSeconds) : '…'}
                           </p>
                         </div>
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${log.type === 'idle' ? 'bg-amber-400' : log.type === 'away' ? 'bg-slate-300' : log.productive ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${log.type === 'idle' ? 'bg-amber-400' : log.type === 'away' || log.type === 'unknown' ? 'bg-slate-300' : log.productive ? 'bg-emerald-400' : 'bg-rose-400'}`} />
                       </div>
                     ))
                   )

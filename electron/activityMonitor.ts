@@ -36,7 +36,7 @@ export interface ActivityLog {
   appName: string;
   windowTitle: string;
   website?: string;
-  type: 'app' | 'idle' | 'away';
+  type: 'app' | 'idle' | 'away' | 'unknown';
   productive: boolean;
   startTime: string;
   endTime?: string;
@@ -216,7 +216,7 @@ function getWindowViaMacFallback(): { ownerName: string; windowTitle: string } {
         'System Settings > Privacy & Security > Accessibility. Underlying error: ' + message
       );
     }
-    // keep cached values
+    _macFallbackCache = { ownerName: 'Unknown', windowTitle: 'Unknown' };
   }
   return _macFallbackCache;
 }
@@ -375,7 +375,7 @@ function startNewLog(appName: string, windowTitle: string, productive: boolean, 
 
 function getProductiveState(appName: string, isIdle: boolean, website?: string): ActivityState {
   if (isIdle) return 'idle';
-  if (!appName || appName === 'Unknown') return 'away';
+  if (!appName || appName === 'Unknown') return 'neutral';
   if (appName === 'Knockturn Agent') return 'productive';
   
   // 1. Check website classification if website is provided
@@ -528,7 +528,11 @@ async function refreshActivity() {
 
     if (!isIdle) lastInputTime = now;
 
-    const logType: ActivityLog['type'] = isIdle ? 'idle' : (!ownerName || ownerName === 'Unknown') ? 'away' : 'app';
+    const logType: ActivityLog['type'] = isIdle
+      ? 'idle'
+      : (!ownerName || ownerName === 'Unknown')
+        ? 'unknown'
+        : 'app';
     const shouldUpdate =
       !currentLog ||
       currentLog.appName !== ownerName ||
