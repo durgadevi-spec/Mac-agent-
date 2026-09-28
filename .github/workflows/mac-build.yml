@@ -31,6 +31,10 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: |
+          test -n "$TIMESHEET_DB_URL" || { echo "Missing GitHub secret: TIMESHEET_DB_URL"; exit 1; }
+          test -n "$LMS_DATABASE_URL" || { echo "Missing GitHub secret: LMS_DATABASE_URL"; exit 1; }
+          test -n "$VITE_SUPABASE_URL" || { echo "Missing GitHub secret: VITE_SUPABASE_URL"; exit 1; }
+          test -n "$VITE_SUPABASE_ANON_KEY" || { echo "Missing GitHub secret: VITE_SUPABASE_ANON_KEY"; exit 1; }
           printf 'PORT=5003\n' > .env
           printf 'TIMESHEET_DB_URL=%s\n' "$TIMESHEET_DB_URL" >> .env
           printf 'LMS_DATABASE_URL=%s\n' "$LMS_DATABASE_URL" >> .env
