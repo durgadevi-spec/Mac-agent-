@@ -25,17 +25,23 @@ jobs:
         run: npm ci
 
       - name: Create .env file for build
+        env:
+          TIMESHEET_DB_URL: ${{ secrets.TIMESHEET_DB_URL }}
+          LMS_DATABASE_URL: ${{ secrets.LMS_DATABASE_URL }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: |
-          echo "VITE_SUPABASE_URL=https://ogqmojvzeyasqoqhkpuz.supabase.co" > .env
-          echo "VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ncW1vanZ6ZXlhc3FvcWhrcHV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNTM1NTQsImV4cCI6MjA5NjgyOTU1NH0.kWuDdRb2bb8IAOMot5BnIvQzWefOAkYfIRmJxFqT4v8" >> .env
+          printf 'PORT=5003\n' > .env
+          printf 'TIMESHEET_DB_URL=%s\n' "$TIMESHEET_DB_URL" >> .env
+          printf 'LMS_DATABASE_URL=%s\n' "$LMS_DATABASE_URL" >> .env
+          printf 'VITE_SUPABASE_URL=%s\n' "$VITE_SUPABASE_URL" >> .env
+          printf 'VITE_SUPABASE_ANON_KEY=%s\n' "$VITE_SUPABASE_ANON_KEY" >> .env
 
       - name: Build macOS App
         run: npm run build:mac
         env:
-          GH_TOKEN: ${{ secrets.github_token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MACOSX_DEPLOYMENT_TARGET: "10.15"
-          VITE_SUPABASE_URL: "https://ogqmojvzeyasqoqhkpuz.supabase.co"
-          VITE_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ncW1vanZ6ZXlhc3FvcWhrcHV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNTM1NTQsImV4cCI6MjA5NjgyOTU1NH0.kWuDdRb2bb8IAOMot5BnIvQzWefOAkYfIRmJxFqT4v8"
 
       - name: Upload macOS build artifact
         uses: actions/upload-artifact@v4
