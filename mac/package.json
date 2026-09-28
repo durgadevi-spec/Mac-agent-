@@ -1,25 +1,31 @@
 {
-  "name": "knockturn-employee-agent-mac",
-  "description": "Knockturn Employee Productivity Agent - macOS Version",
+  "name": "knockturn-employee-agent",
+  "description": "Knockturn Employee Productivity Agent - Desktop App",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "main": "dist/electron/main.mac.js",
+  "main": "dist/electron/main.js",
   "homepage": "./",
   "scripts": {
-    "clean": "rm -rf dist/app dist/electron",
+    "clean": "node -e \"import { rmSync } from 'node:fs'; rmSync('dist/app', { recursive: true, force: true }); rmSync('dist/electron', { recursive: true, force: true });\"",
     "dev": "vite",
-    "dev:mac": "electron dist/electron/main.mac.js",
-    "build": "vite build && npm run build:mac:electron",
-    "build:mac:electron": "tsc --project mac/tsconfig.mac.json && cp electron/preload.cjs dist/electron/preload.cjs",
-    "build:mac:dmg": "npm run build && electron-builder --mac --config.directories.output=release/mac",
-    "build:mac:universal": "npm run build && electron-builder --mac --universal --config.directories.output=release/mac",
+    "dev:electron": "electron .",
+    "build": "vite build && npm run build:electron",
+    "build:electron": "tsc --project tsconfig.electron.json && node -e \"const fs = require('fs'); const path = require('path'); const src = path.join('dist','electron','src'); const dest = path.join('dist','src'); if (fs.existsSync(src)) { fs.rmSync(dest, { recursive: true, force: true }); const copyRecursive = (srcDir, destDir) => { fs.mkdirSync(destDir, { recursive: true }); for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) { const srcPath = path.join(srcDir, entry.name); const destPath = path.join(destDir, entry.name); if (entry.isDirectory()) copyRecursive(srcPath, destPath); else fs.copyFileSync(srcPath, destPath); } }; copyRecursive(src, dest); } fs.mkdirSync(path.join('dist','electron'), { recursive: true }); fs.copyFileSync('electron/preload.cjs', 'dist/electron/preload.cjs');\"",
+    "build:windows": "npm run build && npm run copy:env && electron-builder --win --config.directories.output=release",
+    "build:mac": "npm run build && npm run copy:env && electron-builder --mac --x64 --arm64 --config.directories.output=release",
+    "copy:env": "node -e \"const fs = require('fs'); const path = require('path'); const envFile = '.env'; const destDir = path.join('dist'); if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true }); if (fs.existsSync(envFile)) { fs.copyFileSync(envFile, path.join(destDir, envFile)); console.log('✓ Copied .env to dist/'); } else { console.warn('⚠ .env file not found'); }\"",
+    "build:msi": "npm run build && electron-builder --win msi --config.directories.output=release",
+    "lint": "eslint .",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.app.json"
+    "typecheck": "tsc --noEmit -p tsconfig.app.json",
+    "electron": "electron dist/electron/main.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
     "@types/react-datepicker": "^6.2.0",
+    "active-win": "^9.0.0",
+    "auto-launch": "^5.0.0",
     "date-fns": "^4.3.0",
     "dotenv": "^17.4.2",
     "electron-is-dev": "^2.0.0",
@@ -31,24 +37,85 @@
     "react-datepicker": "^9.1.0",
     "react-dom": "^18.3.1",
     "recharts": "^2.10.0",
-    "screenshot-desktop": "^1.15.4"
+    "screenshot-desktop": "^1.15.4",
+    "systeminformation": "^5.31.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",
+    "@types/auto-launch": "^5.0.5",
+    "@types/electron": "^1.6.10",
     "@types/node": "^20.0.0",
     "@types/node-cron": "^3.0.11",
     "@types/pg": "^8.20.0",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@types/screenshot-desktop": "^1.15.0",
-    "@vitejs/plugin-react": "^4.3.4",
-    "autoprefixer": "^10.4.20",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.8",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.18",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
     "eslint": "^9.9.1",
-    "postcss": "^8.4.46",
-    "tailwindcss": "^3.4.13",
-    "typescript": "^5.5.4",
-    "vite": "^5.4.11"
+    "eslint-plugin-react-hooks": "^5.1.0-rc.0",
+    "eslint-plugin-react-refresh": "^0.4.11",
+    "globals": "^15.9.0",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.5.3",
+    "typescript-eslint": "^8.3.0",
+    "vite": "^5.4.2"
+  },
+  "build": {
+    "appId": "com.knockturn.employee-agent",
+    "productName": "Knockturn Employee Agent",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/app/**/*",
+      "dist/electron/**/*",
+      "dist/src/**/*",
+      "node_modules/**/*",
+      "electron/**/*"
+    ],
+    "extraFiles": [
+      {
+        "from": "dist/.env",
+        "to": ".env",
+        "filter": ["**/*"]
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/active-win/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Knockturn Employee Agent"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "assets/icon.png",
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "entitlements": "mac/entitlements.mac.plist",
+      "entitlementsInherit": "mac/entitlements.mac.plist",
+      "minimumSystemVersion": "10.15.0",
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "Knockturn Employee Agent needs to send Apple Events to System Events, Chrome, and Safari to record which application and window you have active, so time can be tracked accurately.",
+        "NSSystemAdministrationUsageDescription": "Knockturn Employee Agent needs this permission to record active window/app usage for time tracking."
+      }
+    }
   }
 }
