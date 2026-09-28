@@ -684,16 +684,15 @@ export async function createActivityLog(entry: {
     website: entry.website || '',
   };
 
-  const { data, error } = await supabase.from('activity_logs').insert([payload]) as {
-    data: ActivityLog[] | null;
+  const { error } = await supabase.from('activity_logs').insert([payload]) as {
     error: PostgrestError | null;
   };
 
   if (error) {
     console.error('Error writing activity log:', error);
-    return null;
+    return false;
   }
-  return data;
+  return true;
 }
 
 export interface IdleAlert {

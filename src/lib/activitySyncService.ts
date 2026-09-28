@@ -278,6 +278,7 @@ class ActivitySyncService {
 
       console.log(`[Sync] Processing ${newLogs.length} new activity logs for upload (including ${newLogs.filter(l => l.duration_seconds === 0).length} incomplete activities)`);
 
+      let activityLogInsertFailures = 0;
       for (const log of newLogs) {
         // Log website information when available for Chrome
         if (log.app_name && (log.app_name.toLowerCase().includes('chrome') || log.app_name.toLowerCase().includes('edge') || log.app_name.toLowerCase().includes('firefox'))) {
@@ -287,13 +288,13 @@ class ActivitySyncService {
         // Only sync if we have a duration or if it's from within the last sync interval
         // This prevents syncing activities that are too old but not completed
         if (log.duration_seconds > 0 || (Date.now() - new Date(log.timestamp).getTime()) < 60000) {
-          await createActivityLog({
+          const insertedLog = await createActivityLog({
             session_id: sessionId,
             employee_id: data.employee_id,
             app_name: log.app_name || data.current_app,
             window_title: log.window_title || '',
             activity_type: log.type || 'idle',
-            idle_reason: log.productive === false ? 'Non-productive or idle' : null,
+            idle_reason: null,
             logged_at: log.timestamp || data.timestamp,
             cpu_usage: log.cpu_usage,
             memory_usage: log.memory_usage,
@@ -301,6 +302,7 @@ class ActivitySyncService {
             productive: log.productive,
             website: log.website,
           });
+          if (!insertedLog) activityLogInsertFailures++;
         }
 
         if (log.timestamp > latestTimestamp) {
@@ -308,6 +310,9 @@ class ActivitySyncService {
         }
       }
 
+      if (activityLogInsertFailures > 0) {
+        throw new Error(`Failed to insert ${activityLogInsertFailures} activity log(s)`);
+      }
       if (latestTimestamp !== lastSyncedLogTime) {
         localStorage.setItem('lastSyncedLogTime', latestTimestamp);
       }
