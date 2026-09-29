@@ -191,10 +191,10 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let windowLocked = true;
-let lockedWindowFocusInterval: NodeJS.Timeout | null = null;
+let lockedChildWindowOpen = false;
 
 function refocusLockedWindow() {
-  if (process.platform !== 'darwin' || !windowLocked || !mainWindow || mainWindow.isDestroyed()) return;
+  if (process.platform !== 'darwin' || !windowLocked || lockedChildWindowOpen || !mainWindow || mainWindow.isDestroyed()) return;
 
   try {
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -211,19 +211,7 @@ function refocusLockedWindow() {
 
 function syncLockedWindowFocusEnforcement() {
   if (process.platform !== 'darwin') return;
-
-  if (windowLocked) {
-    if (!lockedWindowFocusInterval) {
-      lockedWindowFocusInterval = setInterval(refocusLockedWindow, 750);
-    }
-    refocusLockedWindow();
-    return;
-  }
-
-  if (lockedWindowFocusInterval) {
-    clearInterval(lockedWindowFocusInterval);
-    lockedWindowFocusInterval = null;
-  }
+  if (windowLocked) refocusLockedWindow();
 }
 
 // Session persistence path
@@ -403,6 +391,7 @@ async function createWindow() {
       if (process.platform === 'darwin') {
         mainWindow?.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
         mainWindow?.setKiosk(true);
+        mainWindow?.setFullScreen(true);
       }
       mainWindow?.setAlwaysOnTop(true, 'screen-saver');
       syncLockedWindowFocusEnforcement();
@@ -430,8 +419,8 @@ async function createWindow() {
   });
 
   mainWindow.on('blur', () => {
-    if (process.platform === 'darwin' && windowLocked) {
-      setTimeout(refocusLockedWindow, 100);
+    if (process.platform === 'darwin' && windowLocked && !lockedChildWindowOpen) {
+      setTimeout(refocusLockedWindow, 500);
     }
   });
 
@@ -657,6 +646,7 @@ ipcMain.handle('enter-kiosk', async () => {
         mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
       }
       mainWindow.setKiosk(true);
+      if (process.platform === 'darwin') mainWindow.setFullScreen(true);
       mainWindow.setAlwaysOnTop(true, 'screen-saver');
       mainWindow.show(); mainWindow.focus();
     }
@@ -671,6 +661,7 @@ ipcMain.handle('exit-kiosk', async () => {
     syncLockedWindowFocusEnforcement();
     if (mainWindow) {
       mainWindow.setKiosk(false);
+      if (process.platform === 'darwin') mainWindow.setFullScreen(false);
       mainWindow.setAlwaysOnTop(false);
       if (process.platform === 'darwin') mainWindow.setVisibleOnAllWorkspaces(false);
       mainWindow.show(); mainWindow.focus();
@@ -995,6 +986,7 @@ ipcMain.handle('open-timesheet-browser', async () => {
   }
 
   try {
+    lockedChildWindowOpen = windowLocked;
     const timesheetWin = new BrowserWindow({
       width: 1000,
       height: 800,
@@ -1018,8 +1010,16 @@ ipcMain.handle('open-timesheet-browser', async () => {
 
     timesheetWin.loadURL(timesheetUrl);
     timesheetWin.maximize();
+    timesheetWin.once('closed', () => {
+      lockedChildWindowOpen = false;
+      if (windowLocked) {
+        mainWindow?.show();
+        mainWindow?.focus();
+      }
+    });
     return true;
   } catch (error) {
+    lockedChildWindowOpen = false;
     console.error('[TimesheetIPC] open-timesheet-browser failed:', error);
     return false;
   }
@@ -1369,8 +1369,6 @@ app.on('before-quit', (event) => {
     return;
   }
   isQuitting = true;
-  if (lockedWindowFocusInterval) clearInterval(lockedWindowFocusInterval);
-  lockedWindowFocusInterval = null;
   stopBackgroundMonitoring();
   stopFloatingTimerUpdates();
   stopLocalServer();

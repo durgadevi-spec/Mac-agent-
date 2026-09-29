@@ -1,5 +1,5 @@
 import { app, powerMonitor, BrowserWindow, Notification } from 'electron';
-import { execSync, spawnSync } from 'child_process';
+import { execFile, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { showIdlePromptWindow } from './idlePromptWindow.js';
@@ -170,21 +170,39 @@ let _lastMacErrorLogAt = 0;
 let _lastMacBrowserErrorLog = '';
 let _lastMacBrowserErrorLogAt = 0;
 
-function getMacOSBrowserTitle(appName: string): string | undefined {
+interface AppleScriptExecutionResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  error?: Error;
+}
+
+function runAppleScript(args: string[], timeout: number): Promise<AppleScriptExecutionResult> {
+  return new Promise(resolve => {
+    execFile('osascript', args, { encoding: 'utf8', timeout }, (error, stdout, stderr) => {
+      const errorCode = (error as NodeJS.ErrnoException | null)?.code;
+      resolve({
+        stdout: String(stdout || '').trim(),
+        stderr: String(stderr || '').trim(),
+        exitCode: typeof errorCode === 'number' ? errorCode : error ? -1 : 0,
+        error: error || undefined,
+      });
+    });
+  });
+}
+
+async function getMacOSBrowserTitle(appName: string): Promise<string | undefined> {
   const script = getMacOSBrowserTitleScript(appName);
   if (!script) return undefined;
 
-  const result = spawnSync('osascript', ['-e', script], { encoding: 'utf8', timeout: 2000 });
-  const stdout = (result.stdout || '').trim();
-  const stderr = (result.stderr || '').trim();
-  if (!result.error && result.status === 0 && stdout) return stdout;
+  const result = await runAppleScript(['-e', script], 2000);
+  if (!result.error && result.exitCode === 0 && result.stdout) return result.stdout;
 
   const errorDetails = [
     result.error ? String(result.error) : '',
-    `exitCode=${result.status === null ? 'null' : result.status}`,
-    result.signal ? `signal=${result.signal}` : '',
-    `stdout=${JSON.stringify(stdout)}`,
-    `stderr=${JSON.stringify(stderr)}`,
+    `exitCode=${result.exitCode}`,
+    `stdout=${JSON.stringify(result.stdout)}`,
+    `stderr=${JSON.stringify(result.stderr)}`,
   ].filter(Boolean).join(' ');
   const now = Date.now();
   if (errorDetails !== _lastMacBrowserErrorLog || now - _lastMacBrowserErrorLogAt >= 30000) {
@@ -195,23 +213,18 @@ function getMacOSBrowserTitle(appName: string): string | undefined {
   return undefined;
 }
 
-function getWindowViaMacFallback(): { ownerName: string; windowTitle: string } {
+async function getWindowViaMacFallback(): Promise<{ ownerName: string; windowTitle: string }> {
   const now = Date.now();
   if (now - _macFallbackTs < 1000) return { ..._macFallbackCache };
   _macFallbackTs = now;
 
-  const result = spawnSync('osascript', ['-l', 'AppleScript', scptScriptPath], {
-    encoding: 'utf8',
-    timeout: 3000,
-  });
-  const stdout = (result.stdout || '').trim();
-  const stderr = (result.stderr || '').trim();
+  const result = await runAppleScript(['-l', 'AppleScript', scptScriptPath], 3000);
+  const { stdout, stderr } = result;
 
-  if (result.error || result.status !== 0) {
+  if (result.error || result.exitCode !== 0) {
     const errorDetails = [
       result.error ? String(result.error) : '',
-      `exitCode=${result.status === null ? 'null' : result.status}`,
-      result.signal ? `signal=${result.signal}` : '',
+      `exitCode=${result.exitCode}`,
       `stdout=${JSON.stringify(stdout)}`,
       `stderr=${JSON.stringify(stderr)}`,
     ].filter(Boolean).join(' ');
@@ -240,7 +253,7 @@ function getWindowViaMacFallback(): { ownerName: string; windowTitle: string } {
   const detectionLog = `${detected.ownerName}|${detected.windowTitle}`;
   if (detectionLog !== _lastDetectionLog) {
     console.info(
-      `[Monitor] AppleScript exitCode=${result.status} stdout=${JSON.stringify(stdout)} ` +
+      `[Monitor] AppleScript exitCode=${result.exitCode} stdout=${JSON.stringify(stdout)} ` +
       `stderr=${JSON.stringify(stderr)} app=${JSON.stringify(detected.ownerName)} ` +
       `title=${JSON.stringify(detected.windowTitle)}`
     );
@@ -536,7 +549,7 @@ async function refreshActivity() {
     if (process.platform === 'darwin' && (
       ownerName === 'Unknown' || ownerName === '' || windowTitle === 'Unknown'
     )) {
-      const fb = getWindowViaMacFallback();
+      const fb = await getWindowViaMacFallback();
       if (fb.ownerName && fb.ownerName !== 'Unknown') ownerName = normalizeAppName(fb.ownerName);
       if (fb.windowTitle && fb.windowTitle !== 'Unknown') windowTitle = fb.windowTitle;
     } else if (ownerName === 'Unknown' || ownerName === '') {
@@ -548,7 +561,7 @@ async function refreshActivity() {
     }
 
     if (process.platform === 'darwin' && ownerName !== 'Unknown') {
-      const browserTitle = getMacOSBrowserTitle(ownerName);
+      const browserTitle = await getMacOSBrowserTitle(ownerName);
       if (browserTitle) windowTitle = browserTitle;
       if (!windowTitle || windowTitle === 'Unknown') windowTitle = ownerName;
 
