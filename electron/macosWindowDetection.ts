@@ -1,4 +1,4 @@
-export const MACOS_WINDOW_DETECTION_SCRIPT_VERSION = 2;
+export const MACOS_WINDOW_DETECTION_SCRIPT_VERSION = 3;
 
 export const MACOS_WINDOW_DETECTION_SCRIPT = `set frontApp to ""
 set windowTitle to ""
@@ -13,44 +13,6 @@ tell application "System Events"
         set titleError to (errorNumber as text) & ": " & errorMessage
     end try
 end tell
-
-if frontApp is "Google Chrome" then
-    try
-        tell application "Google Chrome"
-            set browserTitle to title of active tab of front window
-        end tell
-        if browserTitle is not "" then set windowTitle to browserTitle
-    on error errorMessage number errorNumber
-        if titleError is "" then set titleError to (errorNumber as text) & ": " & errorMessage
-    end try
-else if frontApp is "Brave Browser" then
-    try
-        tell application "Brave Browser"
-            set browserTitle to title of active tab of front window
-        end tell
-        if browserTitle is not "" then set windowTitle to browserTitle
-    on error errorMessage number errorNumber
-        if titleError is "" then set titleError to (errorNumber as text) & ": " & errorMessage
-    end try
-else if frontApp is "Microsoft Edge" then
-    try
-        tell application "Microsoft Edge"
-            set browserTitle to title of active tab of front window
-        end tell
-        if browserTitle is not "" then set windowTitle to browserTitle
-    on error errorMessage number errorNumber
-        if titleError is "" then set titleError to (errorNumber as text) & ": " & errorMessage
-    end try
-else if frontApp is "Safari" then
-    try
-        tell application "Safari"
-            set browserTitle to name of front document
-        end tell
-        if browserTitle is not "" then set windowTitle to browserTitle
-    on error errorMessage number errorNumber
-        if titleError is "" then set titleError to (errorNumber as text) & ": " & errorMessage
-    end try
-end if
 
 return frontApp & (character id 30) & windowTitle & (character id 30) & titleError`;
 

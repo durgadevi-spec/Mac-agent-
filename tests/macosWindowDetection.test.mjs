@@ -25,11 +25,11 @@ test('rejects malformed AppleScript output rather than silently returning Unknow
   assert.equal(parseMacWindowDetectionOutput('\u001eUnknown\u001e'), null);
 });
 
-test('uses fixed browser targets and a System Events front-window lookup', () => {
-  assert.equal(MACOS_WINDOW_DETECTION_SCRIPT_VERSION, 2);
+test('uses System Events for all foreground window titles without application dictionaries', () => {
+  assert.equal(MACOS_WINDOW_DETECTION_SCRIPT_VERSION, 3);
   assert.match(MACOS_WINDOW_DETECTION_SCRIPT, /first application process whose frontmost is true/);
-  for (const browser of ['Google Chrome', 'Brave Browser', 'Microsoft Edge', 'Safari']) {
-    assert.ok(MACOS_WINDOW_DETECTION_SCRIPT.includes(`tell application "${browser}"`));
-  }
+  assert.match(MACOS_WINDOW_DETECTION_SCRIPT, /name of window 1 of frontProcess/);
+  assert.match(MACOS_WINDOW_DETECTION_SCRIPT, /tell application "System Events"/);
   assert.doesNotMatch(MACOS_WINDOW_DETECTION_SCRIPT, /tell application frontApp/);
+  assert.doesNotMatch(MACOS_WINDOW_DETECTION_SCRIPT, /active tab|front document/);
 });
