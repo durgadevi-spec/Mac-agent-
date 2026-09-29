@@ -1,4 +1,4 @@
-export const MACOS_WINDOW_DETECTION_SCRIPT_VERSION = 3;
+export const MACOS_WINDOW_DETECTION_SCRIPT_VERSION = 4;
 
 export const MACOS_WINDOW_DETECTION_SCRIPT = `set frontApp to ""
 set windowTitle to ""
@@ -37,4 +37,15 @@ export function parseMacWindowDetectionOutput(output: string): MacWindowDetectio
     windowTitle: output.slice(firstSeparator + 1, secondSeparator).trim() || 'Unknown',
     error: output.slice(secondSeparator + 1).trim() || undefined,
   };
+}
+
+const MACOS_BROWSER_TITLE_SCRIPTS: Record<string, string> = {
+  Chrome: 'tell application "Google Chrome" to get title of active tab of front window',
+  Brave: 'tell application "Brave Browser" to get title of active tab of front window',
+  'Microsoft Edge': 'tell application "Microsoft Edge" to get title of active tab of front window',
+  Safari: 'tell application "Safari" to get name of front document',
+};
+
+export function getMacOSBrowserTitleScript(appName: string): string | undefined {
+  return MACOS_BROWSER_TITLE_SCRIPTS[appName];
 }

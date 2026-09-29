@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   MACOS_WINDOW_DETECTION_SCRIPT,
   MACOS_WINDOW_DETECTION_SCRIPT_VERSION,
+  getMacOSBrowserTitleScript,
   parseMacWindowDetectionOutput,
 } from '../dist/electron/macosWindowDetection.js';
 
@@ -26,10 +27,18 @@ test('rejects malformed AppleScript output rather than silently returning Unknow
 });
 
 test('uses System Events for all foreground window titles without application dictionaries', () => {
-  assert.equal(MACOS_WINDOW_DETECTION_SCRIPT_VERSION, 3);
+  assert.equal(MACOS_WINDOW_DETECTION_SCRIPT_VERSION, 4);
   assert.match(MACOS_WINDOW_DETECTION_SCRIPT, /first application process whose frontmost is true/);
   assert.match(MACOS_WINDOW_DETECTION_SCRIPT, /name of window 1 of frontProcess/);
   assert.match(MACOS_WINDOW_DETECTION_SCRIPT, /tell application "System Events"/);
   assert.doesNotMatch(MACOS_WINDOW_DETECTION_SCRIPT, /tell application frontApp/);
   assert.doesNotMatch(MACOS_WINDOW_DETECTION_SCRIPT, /active tab|front document/);
+});
+
+test('provides fixed runtime scripts for supported browser tab titles', () => {
+  assert.equal(getMacOSBrowserTitleScript('Chrome'), 'tell application "Google Chrome" to get title of active tab of front window');
+  assert.equal(getMacOSBrowserTitleScript('Brave'), 'tell application "Brave Browser" to get title of active tab of front window');
+  assert.equal(getMacOSBrowserTitleScript('Microsoft Edge'), 'tell application "Microsoft Edge" to get title of active tab of front window');
+  assert.equal(getMacOSBrowserTitleScript('Safari'), 'tell application "Safari" to get name of front document');
+  assert.equal(getMacOSBrowserTitleScript('Finder'), undefined);
 });

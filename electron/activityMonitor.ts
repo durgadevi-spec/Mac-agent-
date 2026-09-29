@@ -6,6 +6,7 @@ import { showIdlePromptWindow } from './idlePromptWindow.js';
 import {
   MACOS_WINDOW_DETECTION_SCRIPT,
   MACOS_WINDOW_DETECTION_SCRIPT_VERSION,
+  getMacOSBrowserTitleScript,
   parseMacWindowDetectionOutput,
 } from './macosWindowDetection.js';
 
@@ -166,6 +167,33 @@ let _macFallbackCache: { ownerName: string; windowTitle: string } = { ownerName:
 let _lastDetectionLog = '';
 let _lastMacErrorLog = '';
 let _lastMacErrorLogAt = 0;
+let _lastMacBrowserErrorLog = '';
+let _lastMacBrowserErrorLogAt = 0;
+
+function getMacOSBrowserTitle(appName: string): string | undefined {
+  const script = getMacOSBrowserTitleScript(appName);
+  if (!script) return undefined;
+
+  const result = spawnSync('osascript', ['-e', script], { encoding: 'utf8', timeout: 2000 });
+  const stdout = (result.stdout || '').trim();
+  const stderr = (result.stderr || '').trim();
+  if (!result.error && result.status === 0 && stdout) return stdout;
+
+  const errorDetails = [
+    result.error ? String(result.error) : '',
+    `exitCode=${result.status === null ? 'null' : result.status}`,
+    result.signal ? `signal=${result.signal}` : '',
+    `stdout=${JSON.stringify(stdout)}`,
+    `stderr=${JSON.stringify(stderr)}`,
+  ].filter(Boolean).join(' ');
+  const now = Date.now();
+  if (errorDetails !== _lastMacBrowserErrorLog || now - _lastMacBrowserErrorLogAt >= 30000) {
+    console.warn(`[Monitor] Browser tab-title lookup failed for ${appName}: ${errorDetails}`);
+    _lastMacBrowserErrorLog = errorDetails;
+    _lastMacBrowserErrorLogAt = now;
+  }
+  return undefined;
+}
 
 function getWindowViaMacFallback(): { ownerName: string; windowTitle: string } {
   const now = Date.now();
@@ -516,6 +544,18 @@ async function refreshActivity() {
         const fb = getWindowViaFallback();
         ownerName = normalizeAppName(fb.ownerName);
         windowTitle = fb.windowTitle || 'Unknown';
+      }
+    }
+
+    if (process.platform === 'darwin' && ownerName !== 'Unknown') {
+      const browserTitle = getMacOSBrowserTitle(ownerName);
+      if (browserTitle) windowTitle = browserTitle;
+      if (!windowTitle || windowTitle === 'Unknown') windowTitle = ownerName;
+
+      const detectionLog = `${ownerName}|${windowTitle}`;
+      if (detectionLog !== _lastDetectionLog) {
+        console.info(`[Monitor] macOS foreground app=${JSON.stringify(ownerName)} title=${JSON.stringify(windowTitle)}`);
+        _lastDetectionLog = detectionLog;
       }
     }
 
