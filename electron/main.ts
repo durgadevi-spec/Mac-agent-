@@ -190,7 +190,41 @@ export { getTimesheetDbUrl };
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
-let windowLocked = false;
+let windowLocked = true;
+let lockedWindowFocusInterval: NodeJS.Timeout | null = null;
+
+function refocusLockedWindow() {
+  if (process.platform !== 'darwin' || !windowLocked || !mainWindow || mainWindow.isDestroyed()) return;
+
+  try {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    if (!mainWindow.isVisible()) mainWindow.show();
+    if (!mainWindow.isFocused()) {
+      mainWindow.setAlwaysOnTop(true, 'screen-saver');
+      mainWindow.moveTop();
+      mainWindow.focus();
+    }
+  } catch (error) {
+    console.error('[Main] Failed to refocus locked check-in window:', error);
+  }
+}
+
+function syncLockedWindowFocusEnforcement() {
+  if (process.platform !== 'darwin') return;
+
+  if (windowLocked) {
+    if (!lockedWindowFocusInterval) {
+      lockedWindowFocusInterval = setInterval(refocusLockedWindow, 750);
+    }
+    refocusLockedWindow();
+    return;
+  }
+
+  if (lockedWindowFocusInterval) {
+    clearInterval(lockedWindowFocusInterval);
+    lockedWindowFocusInterval = null;
+  }
+}
 
 // Session persistence path
 const sessionCachePath = path.join(app.getPath('userData'), 'session-cache.json');
@@ -314,61 +348,36 @@ async function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
-      devTools: true,  // Enable DevTools
+      devTools: !app.isPackaged,
     },
   });
 
   const startUrl = await resolveStartUrl();
   await mainWindow.loadURL(startUrl);
 
-  // Open DevTools when page finishes loading (more reliable)
-  mainWindow.webContents.on('did-finish-load', () => {
-    console.log('[Main] Page loaded, attempting to open DevTools...');
-    try {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.openDevTools({ mode: 'detach' });
-        console.log('[Main] DevTools opened successfully');
-      }
-    } catch (err) {
-      console.error('[Main] Failed to open DevTools on page load:', err);
-    }
-  });
-
-  // Also try opening immediately with a delay as backup
-  setTimeout(() => {
-    try {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        console.log('[Main] Backup: Opening DevTools with delay...');
-        mainWindow.webContents.openDevTools({ mode: 'detach' });
-      }
-    } catch (err) {
-      console.error('[Main] Backup: Failed to open DevTools:', err);
-    }
-  }, 1000);
-
-  // Add keyboard shortcuts for DevTools (F12, Ctrl+Shift+I)
-  mainWindow.webContents.on('before-input-event', (event, input) => {
-    // F12 to toggle DevTools
-    if (input.key.toLowerCase() === 'f12') {
+  if (!app.isPackaged) {
+    mainWindow.webContents.on('did-finish-load', () => {
       try {
-        mainWindow?.webContents.toggleDevTools();
-        console.log('[Main] F12: Toggling DevTools');
-        event.preventDefault();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.openDevTools({ mode: 'detach' });
+        }
       } catch (err) {
-        console.error('[Main] Failed to toggle DevTools with F12:', err);
+        console.error('[Main] Failed to open DevTools on page load:', err);
       }
-    }
-    // Ctrl+Shift+I also toggles DevTools
-    if (input.control && input.shift && input.key.toLowerCase() === 'i') {
-      try {
-        mainWindow?.webContents.toggleDevTools();
-        console.log('[Main] Ctrl+Shift+I: Toggling DevTools');
-        event.preventDefault();
-      } catch (err) {
-        console.error('[Main] Failed to toggle DevTools with Ctrl+Shift+I:', err);
+    });
+
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      if (input.key.toLowerCase() === 'f12' ||
+        (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+        try {
+          mainWindow?.webContents.toggleDevTools();
+          event.preventDefault();
+        } catch (err) {
+          console.error('[Main] Failed to toggle DevTools:', err);
+        }
       }
-    }
-  });
+    });
+  }
 
   // Set the window reference for activity monitor (actual monitoring starts later via IPC)
   setActivityMonitorWindow(mainWindow);
@@ -390,39 +399,39 @@ async function createWindow() {
     mainWindow?.show();
     mainWindow?.maximize();
     mainWindow?.focus();
-    // Pop above everything briefly so the user sees the login/plan screen
-    mainWindow?.setAlwaysOnTop(true, 'screen-saver');
-    setTimeout(() => {
-      try {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.setAlwaysOnTop(false);
-        }
-      } catch { }
-    }, 2000);
+    if (windowLocked) {
+      if (process.platform === 'darwin') {
+        mainWindow?.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+        mainWindow?.setKiosk(true);
+      }
+      mainWindow?.setAlwaysOnTop(true, 'screen-saver');
+      syncLockedWindowFocusEnforcement();
+    } else {
+      mainWindow?.setAlwaysOnTop(true, 'screen-saver');
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed() && !windowLocked) mainWindow.setAlwaysOnTop(false);
+      }, 2000);
+    }
   });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 
-  // Minimise to tray instead of taskbar.
-  //
-  // NOTE: BrowserWindow.setMinimizable(false) is a Windows/Linux-only API in
-  // Electron - it has no effect on macOS, so the native yellow traffic-light
-  // button always stays clickable there. The only reliable cross-platform way
-  // to stop macOS from minimizing is to catch the 'minimize' event after the
-  // fact and immediately restore/refocus the window. This agent never needs
-  // to be minimized on macOS, so we always cancel it there (not just while
-  // "locked").
   mainWindow.on('minimize', (event: any) => {
-    if (process.platform === 'darwin') {
+    if (process.platform === 'darwin' && windowLocked) {
+      event.preventDefault();
       mainWindow?.restore();
       mainWindow?.show();
       mainWindow?.focus();
-    } else {
-      if (!windowLocked) {
-        mainWindow?.hide();
-      }
+    } else if (process.platform !== 'darwin' && !windowLocked) {
+      mainWindow?.hide();
+    }
+  });
+
+  mainWindow.on('blur', () => {
+    if (process.platform === 'darwin' && windowLocked) {
+      setTimeout(refocusLockedWindow, 100);
     }
   });
 
@@ -441,6 +450,10 @@ async function createWindow() {
   // Block Alt+F4 / Alt+Space when locked
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (windowLocked) {
+      if (input.meta && input.key.toLowerCase() === 'q') {
+        event.preventDefault();
+        return;
+      }
       if (input.alt && input.key.toLowerCase() === 'f4') {
         event.preventDefault();
         return;
@@ -638,20 +651,28 @@ ipcMain.handle('get-cached-data', async (_, key: string) => {
 
 ipcMain.handle('enter-kiosk', async () => {
   try {
+    windowLocked = true;
     if (mainWindow) {
+      if (process.platform === 'darwin') {
+        mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      }
       mainWindow.setKiosk(true);
       mainWindow.setAlwaysOnTop(true, 'screen-saver');
       mainWindow.show(); mainWindow.focus();
     }
+    syncLockedWindowFocusEnforcement();
     return true;
   } catch { return false; }
 });
 
 ipcMain.handle('exit-kiosk', async () => {
   try {
+    windowLocked = false;
+    syncLockedWindowFocusEnforcement();
     if (mainWindow) {
       mainWindow.setKiosk(false);
       mainWindow.setAlwaysOnTop(false);
+      if (process.platform === 'darwin') mainWindow.setVisibleOnAllWorkspaces(false);
       mainWindow.show(); mainWindow.focus();
     }
     return true;
@@ -842,6 +863,7 @@ ipcMain.handle('set-window-minimizable', async (_, minimizable: boolean) => {
       mainWindow.setMaximizable(minimizable);
       if (!minimizable) { mainWindow.show(); mainWindow.focus(); }
       windowLocked = !(mainWindow.isClosable() && mainWindow.isMinimizable());
+      syncLockedWindowFocusEnforcement();
       if (process.platform === 'darwin') {
         mainWindow.setWindowButtonVisibility(!windowLocked);
       }
@@ -855,6 +877,7 @@ ipcMain.handle('set-window-closable', async (_, closable: boolean) => {
     if (mainWindow) {
       mainWindow.setClosable(closable);
       windowLocked = !(mainWindow.isClosable() && mainWindow.isMinimizable());
+      syncLockedWindowFocusEnforcement();
       if (process.platform === 'darwin') {
         mainWindow.setWindowButtonVisibility(!windowLocked);
       }
@@ -1339,8 +1362,15 @@ ipcMain.handle('stop-tracking', async () => {
 
 // ─── App quit ─────────────────────────────────────────────────────────────────
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  if (mainWindow && !mainWindow.isDestroyed() && windowLocked && !isQuitting) {
+    event.preventDefault();
+    refocusLockedWindow();
+    return;
+  }
   isQuitting = true;
+  if (lockedWindowFocusInterval) clearInterval(lockedWindowFocusInterval);
+  lockedWindowFocusInterval = null;
   stopBackgroundMonitoring();
   stopFloatingTimerUpdates();
   stopLocalServer();
