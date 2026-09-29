@@ -72,6 +72,7 @@ const electronAPI = {
   initializeSessionCounters: (active, idle, productive, session) =>
     ipcRenderer.invoke('initialize-session-counters', active, idle, productive, session),
   getRecentScreenshots: () => ipcRenderer.invoke('get-recent-screenshots'),
+  acknowledgeScreenshots: (ids) => ipcRenderer.invoke('acknowledge-screenshots', ids),
   startScreenshotService: () => ipcRenderer.invoke('start-screenshot-service'),
   stopScreenshotService: () => ipcRenderer.invoke('stop-screenshot-service'),
   updateMonitoringSettings: (settings) => ipcRenderer.invoke('update-monitoring-settings', settings),

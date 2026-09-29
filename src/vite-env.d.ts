@@ -6,6 +6,7 @@ export interface ElectronAPI {
   getConnectionStatus: () => Promise<boolean>;
   onConnectionChange: (callback: (status: boolean) => void) => void;
   onlineStatus: boolean;
+  acknowledgeScreenshots: (ids: string[]) => Promise<boolean>;
 }
 
 declare global {

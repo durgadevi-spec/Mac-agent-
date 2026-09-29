@@ -177,6 +177,7 @@ import {
   startScreenshotService,
   stopScreenshotService,
   getRecentScreenshots,
+  acknowledgeScreenshots,
   updateScreenshotSettings,
   setCurrentEmployeeId,
 } from './screenshotService.js';
@@ -701,6 +702,16 @@ ipcMain.handle('get-recent-screenshots', async () => {
   } catch (err) {
     console.error('[IPC] Error in get-recent-screenshots:', err);
     return [];
+  }
+});
+
+ipcMain.handle('acknowledge-screenshots', async (_, ids: string[]) => {
+  try {
+    acknowledgeScreenshots(Array.isArray(ids) ? ids : []);
+    return true;
+  } catch (err) {
+    console.error('[IPC] Error acknowledging screenshots:', err);
+    return false;
   }
 });
 

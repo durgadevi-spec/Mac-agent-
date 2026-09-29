@@ -180,8 +180,12 @@ class ActivitySyncService {
       // Cache locally
       await this.cacheActivityData(activityData);
       console.log('[Sync] Activity data cached');
-      await this.sendToSupabase(activityData);
-      console.log('[Sync] Activity data sent to Supabase');
+      const sent = await this.sendToSupabase(activityData);
+      if (sent) {
+        console.log('[Sync] Activity data sent to Supabase');
+      } else {
+        console.warn('[Sync] Supabase sync incomplete; activity remains cached locally for retry');
+      }
     } catch (error) {
       console.error('Error syncing activity data:', error);
     } finally {
@@ -189,7 +193,8 @@ class ActivitySyncService {
     }
   }
 
-  private async sendToSupabase(data: EmployeeActivityData) {
+  private async sendToSupabase(data: EmployeeActivityData): Promise<boolean> {
+    let syncSucceeded = true;
     let sessionId: string | null = null;
     try {
       const session = await getTodaySession(data.employee_id);
@@ -202,6 +207,7 @@ class ActivitySyncService {
         console.warn('[Sync] Skipping session metrics - no valid database session', sessionId);
       }
     } catch (error) {
+      syncSucceeded = false;
       console.error('Error updating session metrics:', error);
     }
 
@@ -224,8 +230,13 @@ class ActivitySyncService {
         online_status: data.online_status
       };
 
-      await supabase.from('employee_activity').insert([aggregatePayload]);
+      const { error } = await supabase.from('employee_activity').insert([aggregatePayload]);
+      if (error) {
+        syncSucceeded = false;
+        console.error('Error inserting employee activity aggregate:', error);
+      }
     } catch (error) {
+      syncSucceeded = false;
       console.error('Error inserting employee activity aggregate:', error);
     }
 
@@ -239,6 +250,7 @@ class ActivitySyncService {
         try {
           const targetEmployeeId = scr.employee_id || data.employee_id;
           if (!targetEmployeeId) {
+            syncSucceeded = false;
             console.warn(`[Sync] ✗ Skipping screenshot upload for ${scr.app_name}: No employee_id found.`);
             continue;
           }
@@ -254,14 +266,22 @@ class ActivitySyncService {
           });
           if (result) {
             console.log(`[Sync] ✓ Screenshot uploaded for ${scr.app_name} (${scr.captured_at})`);
+            const acknowledged = await (window as any).electronAPI?.acknowledgeScreenshots?.([scr.id]);
+            if (acknowledged === false) {
+              syncSucceeded = false;
+              console.warn(`[Sync] Screenshot upload succeeded but queue acknowledgement failed for ${scr.app_name}`);
+            }
           } else {
+            syncSucceeded = false;
             console.warn(`[Sync] ✗ Failed to upload screenshot for ${scr.app_name}`);
           }
         } catch (error) {
+          syncSucceeded = false;
           console.error(`[Sync] Error uploading screenshot for ${scr.app_name}:`, error);
         }
       }
     } catch (error) {
+      syncSucceeded = false;
       console.error('Error writing screenshots to Supabase:', error);
     }
 
@@ -311,14 +331,18 @@ class ActivitySyncService {
       }
 
       if (activityLogInsertFailures > 0) {
+        syncSucceeded = false;
         throw new Error(`Failed to insert ${activityLogInsertFailures} activity log(s)`);
       }
       if (latestTimestamp !== lastSyncedLogTime) {
         localStorage.setItem('lastSyncedLogTime', latestTimestamp);
       }
     } catch (error) {
+      syncSucceeded = false;
       console.error('Error writing activity logs to Supabase:', error);
     }
+
+    return syncSucceeded;
   }
 
   private async cacheActivityData(data: EmployeeActivityData) {

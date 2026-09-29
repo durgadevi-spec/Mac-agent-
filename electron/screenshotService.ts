@@ -20,7 +20,6 @@ function debugLog(msg: string) {
 let screenshotInterval: NodeJS.Timeout | null = null;
 let pendingScreenshots: Array<{ employee_id: string; app_name: string; captured_at: string; screenshot_data: string; id: string }> = [];
 let currentIntervalMinutes = 3; // Default 3 minutes from settings image
-let lastSyncedScreenshotId = ''; // Track which screenshots have been synced
 let currentEmployeeId: string | null = null;
 
 let shouldBlurScreenshots = false;
@@ -46,7 +45,6 @@ export function setCurrentEmployeeId(id: string | null) {
   if (!id) {
     // If logging out or ID is cleared, wipe the buffer immediately so nothing gets mixed
     pendingScreenshots = [];
-    lastSyncedScreenshotId = '';
     debugLog('[Screenshot] Employee logged out. Cleared pending screenshots buffer.');
   } else {
     debugLog(`[Screenshot] Employee logged in: ${id}`);
@@ -202,14 +200,18 @@ export function stopScreenshotService() {
 }
 
 export function getRecentScreenshots() {
-  // Only return screenshots that haven't been synced yet
-  const unsynced = pendingScreenshots.filter(s => s.id > lastSyncedScreenshotId);
-  debugLog(`[Screenshot] getRecentScreenshots called - returning ${unsynced.length} unsync'd screenshots out of ${pendingScreenshots.length} total`);
-  if (unsynced.length > 0) {
-    debugLog(`[Screenshot] Screenshot details: ` + JSON.stringify(unsynced.map(s => ({ app: s.app_name, time: s.captured_at, dataSize: Math.round(s.screenshot_data.length / 1024) + 'KB' }))));
-    lastSyncedScreenshotId = unsynced[unsynced.length - 1].id;
+  debugLog(`[Screenshot] getRecentScreenshots called - returning ${pendingScreenshots.length} queued screenshots`);
+  if (pendingScreenshots.length > 0) {
+    debugLog(`[Screenshot] Screenshot details: ` + JSON.stringify(pendingScreenshots.map(s => ({ app: s.app_name, time: s.captured_at, dataSize: Math.round(s.screenshot_data.length / 1024) + 'KB' }))));
   }
-  return unsynced;
+  return [...pendingScreenshots];
+}
+
+export function acknowledgeScreenshots(ids: string[]) {
+  const acknowledged = new Set(ids);
+  const initialCount = pendingScreenshots.length;
+  pendingScreenshots = pendingScreenshots.filter(screenshot => !acknowledged.has(screenshot.id));
+  debugLog(`[Screenshot] Acknowledged ${initialCount - pendingScreenshots.length} uploaded screenshots; ${pendingScreenshots.length} remain queued`);
 }
 
 function pruneOldScreenshots(dir: string) {

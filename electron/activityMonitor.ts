@@ -1,8 +1,13 @@
 import { app, powerMonitor, BrowserWindow, Notification } from 'electron';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { showIdlePromptWindow } from './idlePromptWindow.js';
+import {
+  MACOS_WINDOW_DETECTION_SCRIPT,
+  MACOS_WINDOW_DETECTION_SCRIPT_VERSION,
+  parseMacWindowDetectionOutput,
+} from './macosWindowDetection.js';
 
 let activeWinModule: any | null = null;
 let siModule: any | null = null;
@@ -87,6 +92,7 @@ let lastInputTime = Date.now();
 let isRefreshInProgress = false;
 let currentLog: ActivityLog | null = null;
 let activityLogs: ActivityLog[] = [];
+let lastActivityDiskSaveAt = 0;
 
 // System metrics cache
 let lastCpuUsage = 0;
@@ -132,45 +138,23 @@ if ($hwnd -and $hwnd -ne [IntPtr]::Zero) {
     }
 }`;
 
-const scptScriptContent = `global frontApp, windowTitle
-set windowTitle to "Unknown"
-tell application "System Events"
-    set frontApp to name of first application process whose frontmost is true
-end tell
-
-try
-    if frontApp is "Google Chrome" or frontApp is "Brave Browser" or frontApp is "Microsoft Edge" then
-        tell application frontApp
-            set windowTitle to title of active tab of front window
-        end tell
-    else if frontApp is "Safari" then
-        tell application "Safari"
-            set windowTitle to name of front document
-        end tell
-    else
-        tell application "System Events"
-            tell process frontApp
-                if exists window 1 then
-                    set windowTitle to name of window 1
-                end if
-            end tell
-        end tell
-    end if
-end try
-
-return frontApp & "|" & windowTitle`;
-
 function writePsScriptIfNotExist() {
-  try {
-    fs.writeFileSync(psScriptPath, psScriptContent, { encoding: 'utf8' });
-  } catch (err) {
-    console.error('Failed to write getActiveWindow.ps1:', err);
-  }
-  if (process.platform === 'darwin') {
+  if (process.platform === 'win32') {
     try {
-      fs.writeFileSync(scptScriptPath, scptScriptContent, { encoding: 'utf8' });
+      fs.writeFileSync(psScriptPath, psScriptContent, { encoding: 'utf8' });
     } catch (err) {
-      console.error('Failed to write getActiveWindow.scpt:', err);
+      console.error('[Monitor] Failed to write getActiveWindow.ps1:', err);
+    }
+  } else if (process.platform === 'darwin') {
+    try {
+      fs.mkdirSync(path.dirname(scptScriptPath), { recursive: true });
+      fs.writeFileSync(scptScriptPath, MACOS_WINDOW_DETECTION_SCRIPT, { encoding: 'utf8' });
+      console.info(
+        `[Monitor] Generated getActiveWindow.scpt v${MACOS_WINDOW_DETECTION_SCRIPT_VERSION} ` +
+        `at ${scptScriptPath} (${Buffer.byteLength(MACOS_WINDOW_DETECTION_SCRIPT, 'utf8')} bytes)`
+      );
+    } catch (error) {
+      console.error('[Monitor] Failed to regenerate getActiveWindow.scpt:', error);
     }
   }
 }
@@ -179,46 +163,70 @@ function writePsScriptIfNotExist() {
 let _macFallbackTs = 0;
 let _macFallbackCache: { ownerName: string; windowTitle: string } = { ownerName: 'Unknown', windowTitle: 'Unknown' };
 
-// Tracks whether we've already warned about missing macOS permissions this run,
-// so we don't spam the log every second.
-let _macPermissionWarned = false;
+let _lastDetectionLog = '';
+let _lastMacErrorLog = '';
+let _lastMacErrorLogAt = 0;
 
 function getWindowViaMacFallback(): { ownerName: string; windowTitle: string } {
   const now = Date.now();
-  if (now - _macFallbackTs < 1000) return _macFallbackCache;
+  if (now - _macFallbackTs < 1000) return { ..._macFallbackCache };
   _macFallbackTs = now;
-  try {
-    const raw = execSync(`osascript "${scptScriptPath}"`, { timeout: 800, encoding: 'utf8' }).trim();
-    if (raw && raw.includes('|')) {
-      const sep = raw.indexOf('|');
-      _macFallbackCache = {
-        ownerName: raw.slice(0, sep).trim(),
-        windowTitle: raw.slice(sep + 1).trim(),
-      };
-    } else if (raw) {
-      console.warn('[Monitor] osascript returned unexpected output:', raw);
-    }
-  } catch (err: any) {
-    // errAEEventNotPermitted (-1743) / errAEAccessDenied (-1744) mean the user
-    // has not granted Automation permission for this app to control
-    // "System Events" (and Chrome/Safari) under System Settings > Privacy &
-    // Security > Automation. That's the #1 cause of activity logs showing
-    // "Unknown / Unknown" on macOS, so log it loudly (once) instead of
-    // silently keeping stale cached values forever.
-    const message = String(err?.stderr || err?.message || err);
-    if (!_macPermissionWarned) {
-      _macPermissionWarned = true;
-      console.error(
-        '[Monitor] macOS window detection failed. If this mentions "not allowed assistive access" ' +
-        'or "not authorized to send Apple events", grant this app permission under ' +
-        'System Settings > Privacy & Security > Automation (allow control of "System Events", ' +
-        '"Google Chrome", and "Safari"), and also enable it under ' +
-        'System Settings > Privacy & Security > Accessibility. Underlying error: ' + message
-      );
+
+  const result = spawnSync('osascript', ['-l', 'AppleScript', scptScriptPath], {
+    encoding: 'utf8',
+    timeout: 3000,
+  });
+  const stdout = (result.stdout || '').trim();
+  const stderr = (result.stderr || '').trim();
+
+  if (result.error || result.status !== 0) {
+    const errorDetails = [
+      result.error ? String(result.error) : '',
+      `exitCode=${result.status === null ? 'null' : result.status}`,
+      result.signal ? `signal=${result.signal}` : '',
+      `stdout=${JSON.stringify(stdout)}`,
+      `stderr=${JSON.stringify(stderr)}`,
+    ].filter(Boolean).join(' ');
+    if (errorDetails !== _lastMacErrorLog || now - _lastMacErrorLogAt >= 30000) {
+      console.error(`[Monitor] AppleScript execution failed for ${scptScriptPath}: ${errorDetails}`);
+      _lastMacErrorLog = errorDetails;
+      _lastMacErrorLogAt = now;
     }
     _macFallbackCache = { ownerName: 'Unknown', windowTitle: 'Unknown' };
+    return { ..._macFallbackCache };
   }
-  return _macFallbackCache;
+
+  const detected = parseMacWindowDetectionOutput(stdout);
+  if (!detected) {
+    const errorDetails = `invalid stdout=${JSON.stringify(stdout)} stderr=${JSON.stringify(stderr)}`;
+    if (errorDetails !== _lastMacErrorLog || now - _lastMacErrorLogAt >= 30000) {
+      console.error(`[Monitor] AppleScript returned an invalid detection result: ${errorDetails}`);
+      _lastMacErrorLog = errorDetails;
+      _lastMacErrorLogAt = now;
+    }
+    _macFallbackCache = { ownerName: 'Unknown', windowTitle: 'Unknown' };
+    return { ..._macFallbackCache };
+  }
+
+  _macFallbackCache = { ownerName: detected.ownerName, windowTitle: detected.windowTitle };
+  const detectionLog = `${detected.ownerName}|${detected.windowTitle}`;
+  if (detectionLog !== _lastDetectionLog) {
+    console.info(
+      `[Monitor] AppleScript exitCode=${result.status} stdout=${JSON.stringify(stdout)} ` +
+      `stderr=${JSON.stringify(stderr)} app=${JSON.stringify(detected.ownerName)} ` +
+      `title=${JSON.stringify(detected.windowTitle)}`
+    );
+    _lastDetectionLog = detectionLog;
+  }
+  if (detected.error) {
+    const errorDetails = `app=${detected.ownerName} titleError=${detected.error} stderr=${JSON.stringify(stderr)}`;
+    if (errorDetails !== _lastMacErrorLog || now - _lastMacErrorLogAt >= 30000) {
+      console.warn(`[Monitor] AppleScript window-title lookup failed: ${errorDetails}`);
+      _lastMacErrorLog = errorDetails;
+      _lastMacErrorLogAt = now;
+    }
+  }
+  return { ..._macFallbackCache };
 }
 
 // PowerShell fallback (cached 1s)
@@ -302,7 +310,13 @@ function loadLogsFromDisk() {
 
 function saveLogsToDisk() {
   try {
-    fs.writeFileSync(dataPath, JSON.stringify(activityLogs.slice(-maxStoredLogs), null, 2), { encoding: 'utf8' });
+    const currentSnapshot = currentLog
+      ? [{
+          ...currentLog,
+          durationSeconds: Math.max(1, Math.floor((Date.now() - new Date(currentLog.startTime).getTime()) / 1000)),
+        }]
+      : [];
+    fs.writeFileSync(dataPath, JSON.stringify([...currentSnapshot, ...activityLogs].slice(0, maxStoredLogs), null, 2), { encoding: 'utf8' });
   } catch (error) {
     console.error('Failed to save activity logs:', error);
   }
@@ -356,15 +370,16 @@ function parseWebsite(appName: string, title: string): string | undefined {
 
 function closeCurrentLog(endTime: Date) {
   if (!currentLog) return;
-  currentLog.endTime = endTime.toISOString();
-  const dur = Math.max(1, Math.floor((endTime.getTime() - new Date(currentLog.startTime).getTime()) / 1000));
-  currentLog.durationSeconds = dur;
-  currentLog.cpuUsage = lastCpuUsage;
-  currentLog.memoryUsage = lastMemoryUsage;
-  activityLogs.unshift(currentLog);
+  const completedLog = currentLog;
+  completedLog.endTime = endTime.toISOString();
+  const dur = Math.max(1, Math.floor((endTime.getTime() - new Date(completedLog.startTime).getTime()) / 1000));
+  completedLog.durationSeconds = dur;
+  completedLog.cpuUsage = lastCpuUsage;
+  completedLog.memoryUsage = lastMemoryUsage;
+  activityLogs.unshift(completedLog);
   if (activityLogs.length > maxStoredLogs) activityLogs = activityLogs.slice(0, maxStoredLogs);
-  saveLogsToDisk();
   currentLog = null;
+  saveLogsToDisk();
 }
 
 function startNewLog(appName: string, windowTitle: string, productive: boolean, type: ActivityLog['type'], website?: string) {
@@ -448,24 +463,27 @@ async function refreshActivity() {
     let ownerName = 'Unknown';
     let windowTitle = 'Unknown';
 
-    // Primary: active-win (most reliable, no external service needed)
+    // Primary: active-win. On macOS, run the AppleScript fallback when either
+    // the application or its title is unavailable.
     try {
       if (!activeWinModule) {
         activeWinModule = await import('active-win');
       }
       let active: any = null;
       try {
-        // Add timeout of 800ms to prevent hanging
+        // Bound the native query; a timeout is recorded and followed by AppleScript.
         active = await withTimeout(
           activeWinModule.activeWindow(),
-          800,
+          2000,
           null
         );
-      } catch {
+      } catch (activeWinError) {
+        console.warn('[Monitor] active-win query rejected:', activeWinError);
         if (typeof activeWinModule.activeWindowSync === 'function') {
           try {
             active = activeWinModule.activeWindowSync();
-          } catch {
+          } catch (syncError) {
+            console.warn('[Monitor] active-win synchronous fallback failed:', syncError);
             active = null;
           }
         }
@@ -474,24 +492,28 @@ async function refreshActivity() {
       if (active?.owner?.name) {
         ownerName = normalizeAppName(active.owner.name);
         windowTitle = active.title || 'Unknown';
+        const detectionLog = `${ownerName}|${windowTitle}`;
+        if (detectionLog !== _lastDetectionLog) {
+          console.info(`[Monitor] active-win detected app=${JSON.stringify(ownerName)} title=${JSON.stringify(windowTitle)}`);
+          _lastDetectionLog = detectionLog;
+        }
+      } else if (process.platform === 'darwin') {
+        console.warn('[Monitor] active-win returned no foreground window; trying AppleScript fallback');
       }
     } catch (err) {
-      const fallbackName = process.platform === 'darwin' ? 'AppleScript' : 'PowerShell';
-      console.warn(`[Monitor] active-win failed, using ${fallbackName} fallback:`, String((err as any)?.message || err));
-      if (process.platform === 'darwin') {
-        console.warn('[Monitor] On macOS, active-win requires Screen Recording permission: ' +
-          'System Settings > Privacy & Security > Screen Recording.');
-      }
+      console.error('[Monitor] active-win module/query failed:', err);
     }
 
     // Fallback: PowerShell Win32 API / AppleScript macOS
-    if (ownerName === 'Unknown' || ownerName === '') {
+    if (process.platform === 'darwin' && (
+      ownerName === 'Unknown' || ownerName === '' || windowTitle === 'Unknown'
+    )) {
+      const fb = getWindowViaMacFallback();
+      if (fb.ownerName && fb.ownerName !== 'Unknown') ownerName = normalizeAppName(fb.ownerName);
+      if (fb.windowTitle && fb.windowTitle !== 'Unknown') windowTitle = fb.windowTitle;
+    } else if (ownerName === 'Unknown' || ownerName === '') {
       if (process.platform === 'win32') {
         const fb = getWindowViaFallback();
-        ownerName = normalizeAppName(fb.ownerName);
-        windowTitle = fb.windowTitle || 'Unknown';
-      } else if (process.platform === 'darwin') {
-        const fb = getWindowViaMacFallback();
         ownerName = normalizeAppName(fb.ownerName);
         windowTitle = fb.windowTitle || 'Unknown';
       }
@@ -541,6 +563,13 @@ async function refreshActivity() {
 
     if (shouldUpdate) {
       startNewLog(ownerName, windowTitle, state === 'productive', logType, website);
+    }
+    if (currentLog) {
+      currentLog.durationSeconds = Math.max(1, Math.floor((now - new Date(currentLog.startTime).getTime()) / 1000));
+      if (now - lastActivityDiskSaveAt >= 10000) {
+        saveLogsToDisk();
+        lastActivityDiskSaveAt = now;
+      }
     }
 
     activityState.activeWindow = { appName: ownerName, windowTitle, website };

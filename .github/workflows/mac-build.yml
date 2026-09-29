@@ -24,6 +24,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Test macOS window detection script
+        run: |
+          npm run test:macos-window
+          node --input-type=module -e 'import fs from "node:fs"; import { MACOS_WINDOW_DETECTION_SCRIPT } from "./dist/electron/macosWindowDetection.js"; fs.writeFileSync(`${process.env.RUNNER_TEMP}/getActiveWindow.applescript`, MACOS_WINDOW_DETECTION_SCRIPT);'
+          osacompile -o "$RUNNER_TEMP/getActiveWindow.scpt" "$RUNNER_TEMP/getActiveWindow.applescript"
+
       - name: Create .env file for build
         env:
           TIMESHEET_DB_URL: ${{ secrets.TIMESHEET_DB_URL }}

@@ -35,6 +35,7 @@ import {
   startScreenshotService,
   stopScreenshotService,
   getRecentScreenshots,
+  acknowledgeScreenshots,
   updateScreenshotSettings,
 } from '../electron/screenshotService.js';
 import { startDailyScheduler, stopDailyScheduler, triggerDailySummaryEmails } from '../electron/dailyScheduler.js';
@@ -246,6 +247,11 @@ ipcMain.handle('update-floating-timer', (_, data: any) => {
 
 ipcMain.handle('get-recent-screenshots', () => {
   return getRecentScreenshots();
+});
+
+ipcMain.handle('acknowledge-screenshots', (_, ids: string[]) => {
+  acknowledgeScreenshots(Array.isArray(ids) ? ids : []);
+  return true;
 });
 
 ipcMain.handle('update-screenshot-settings', (_, settings: any) => {

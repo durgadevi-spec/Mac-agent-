@@ -19,6 +19,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
+    "test:macos-window": "npm run build:electron && node --test tests/macosWindowDetection.test.mjs",
     "electron": "electron dist/electron/main.js"
   },
   "dependencies": {
