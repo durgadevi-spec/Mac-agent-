@@ -834,6 +834,7 @@ ipcMain.handle('minimize-window', async () => {
 ipcMain.handle('toggle-maximize-window', async () => {
   try {
     if (mainWindow) {
+      if (windowLocked) return false;
       mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
     }
     return true;
@@ -842,6 +843,10 @@ ipcMain.handle('toggle-maximize-window', async () => {
 
 ipcMain.handle('close-window', async () => {
   try {
+    if (windowLocked) {
+      console.warn('[Main] Ignoring close-window request while check-in is locked');
+      return false;
+    }
     if (mainWindow) { isQuitting = true; mainWindow.close(); }
     return true;
   } catch { return false; }
