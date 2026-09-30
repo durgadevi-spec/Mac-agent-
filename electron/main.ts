@@ -192,6 +192,7 @@ let tray: Tray | null = null;
 let isQuitting = false;
 let windowLocked = true;
 let lockedChildWindowOpen = false;
+let refreshTrayMenu: (() => void) | null = null;
 
 function refocusLockedWindow() {
   if (process.platform !== 'darwin' || !windowLocked || lockedChildWindowOpen || !mainWindow || mainWindow.isDestroyed()) return;
@@ -210,6 +211,7 @@ function refocusLockedWindow() {
 }
 
 function syncLockedWindowFocusEnforcement() {
+  refreshTrayMenu?.();
   if (process.platform !== 'darwin') return;
   if (windowLocked) refocusLockedWindow();
 }
@@ -502,7 +504,7 @@ function createTray() {
 
   tray.setToolTip('Knockturn Employee Agent');
 
-  const rebuildMenu = () => Menu.buildFromTemplate([
+  const buildMenu = () => Menu.buildFromTemplate([
     {
       label: 'Show Knockturn',
       click: () => {
@@ -521,14 +523,23 @@ function createTray() {
     { type: 'separator' },
     {
       label: 'Exit',
+      enabled: !windowLocked,
       click: () => {
+        if (windowLocked) {
+          console.warn('[Main] Ignoring tray Exit request while check-in is locked');
+          refocusLockedWindow();
+          return;
+        }
         isQuitting = true;
         app.quit();
       },
     },
   ]);
 
-  tray.setContextMenu(rebuildMenu());
+  refreshTrayMenu = () => {
+    if (tray) tray.setContextMenu(buildMenu());
+  };
+  refreshTrayMenu();
 
   tray.on('click', () => {
     if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
@@ -1368,7 +1379,7 @@ ipcMain.handle('stop-tracking', async () => {
 // ─── App quit ─────────────────────────────────────────────────────────────────
 
 app.on('before-quit', (event) => {
-  if (mainWindow && !mainWindow.isDestroyed() && windowLocked && !isQuitting) {
+  if (mainWindow && !mainWindow.isDestroyed() && windowLocked) {
     event.preventDefault();
     refocusLockedWindow();
     return;
