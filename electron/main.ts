@@ -193,6 +193,7 @@ let isQuitting = false;
 let windowLocked = true;
 let lockedChildWindowOpen = false;
 let refreshTrayMenu: (() => void) | null = null;
+let lockedWindowFocusInterval: NodeJS.Timeout | null = null;
 
 function refocusLockedWindow() {
   if (process.platform !== 'darwin' || !windowLocked || lockedChildWindowOpen || !mainWindow || mainWindow.isDestroyed()) return;
@@ -213,7 +214,21 @@ function refocusLockedWindow() {
 function syncLockedWindowFocusEnforcement() {
   refreshTrayMenu?.();
   if (process.platform !== 'darwin') return;
-  if (windowLocked) refocusLockedWindow();
+
+  if (windowLocked) {
+    mainWindow?.setMovable(false);
+    if (!lockedWindowFocusInterval) {
+      lockedWindowFocusInterval = setInterval(refocusLockedWindow, 1000);
+    }
+    refocusLockedWindow();
+    return;
+  }
+
+  if (lockedWindowFocusInterval) {
+    clearInterval(lockedWindowFocusInterval);
+    lockedWindowFocusInterval = null;
+  }
+  mainWindow?.setMovable(true);
 }
 
 // Session persistence path
@@ -422,7 +437,7 @@ async function createWindow() {
 
   mainWindow.on('blur', () => {
     if (process.platform === 'darwin' && windowLocked && !lockedChildWindowOpen) {
-      setTimeout(refocusLockedWindow, 500);
+      setTimeout(refocusLockedWindow, 100);
     }
   });
 
@@ -1384,6 +1399,8 @@ app.on('before-quit', (event) => {
     refocusLockedWindow();
     return;
   }
+  if (lockedWindowFocusInterval) clearInterval(lockedWindowFocusInterval);
+  lockedWindowFocusInterval = null;
   isQuitting = true;
   stopBackgroundMonitoring();
   stopFloatingTimerUpdates();
