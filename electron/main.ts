@@ -191,9 +191,15 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let windowLocked = true;
+let activeEmployeeSession = false;
 let lockedChildWindowOpen = false;
 let refreshTrayMenu: (() => void) | null = null;
 let lockedWindowFocusInterval: NodeJS.Timeout | null = null;
+
+function setActiveEmployeeSession(active: boolean) {
+  activeEmployeeSession = active;
+  refreshTrayMenu?.();
+}
 
 function refocusLockedWindow() {
   if (process.platform !== 'darwin' || !windowLocked || lockedChildWindowOpen || !mainWindow || mainWindow.isDestroyed()) return;
@@ -238,6 +244,7 @@ const sessionCachePath = path.join(app.getPath('userData'), 'session-cache.json'
 function saveSessionCache(data: any) {
   try {
     fs.writeFileSync(sessionCachePath, JSON.stringify(data), 'utf8');
+    if (data?.employee) setActiveEmployeeSession(!data.session?.day_finished);
   } catch { }
 }
 
@@ -254,6 +261,7 @@ function clearSessionCache() {
   try {
     if (fs.existsSync(sessionCachePath)) fs.unlinkSync(sessionCachePath);
   } catch { }
+  setActiveEmployeeSession(false);
 }
 
 // Register with Windows startup via Registry (robust fallback)
@@ -397,6 +405,7 @@ async function createWindow() {
     const cached = loadSessionCache();
     const today = new Date().toISOString().slice(0, 10);
     if (cached && cached.session?.session_date === today) {
+      setActiveEmployeeSession(!!cached.employee && cached.screen === 'timer' && !cached.session?.day_finished);
       mainWindow?.webContents.send('session-restored', cached);
     } else if (cached) {
       // Stale session from a different day — clear it so user starts fresh
@@ -544,10 +553,10 @@ function createTray() {
     { type: 'separator' },
     {
       label: 'Exit',
-      enabled: !windowLocked,
+      enabled: !windowLocked && !activeEmployeeSession,
       click: () => {
-        if (windowLocked) {
-          console.warn('[Main] Ignoring tray Exit request while check-in is locked');
+        if (windowLocked || activeEmployeeSession) {
+          console.warn('[Main] Ignoring tray Exit request while an employee session or lock is active');
           refocusLockedWindow();
           return;
         }
@@ -762,6 +771,7 @@ ipcMain.handle('acknowledge-screenshots', async (_, ids: string[]) => {
 ipcMain.handle('set-current-employee', async (_, employeeId: string | null) => {
   try {
     setCurrentEmployeeId(employeeId);
+    setActiveEmployeeSession(!!employeeId);
     return true;
   } catch (e) {
     console.error('[IPC] Failed to set current employee ID for screenshots:', e);
@@ -1400,9 +1410,9 @@ ipcMain.handle('stop-tracking', async () => {
 // ─── App quit ─────────────────────────────────────────────────────────────────
 
 app.on('before-quit', (event) => {
-  if (mainWindow && !mainWindow.isDestroyed() && windowLocked) {
+  if (mainWindow && !mainWindow.isDestroyed() && (windowLocked || activeEmployeeSession)) {
     event.preventDefault();
-    refocusLockedWindow();
+    if (windowLocked) refocusLockedWindow();
     return;
   }
   if (lockedWindowFocusInterval) clearInterval(lockedWindowFocusInterval);

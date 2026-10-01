@@ -1,4 +1,4 @@
-import { app, nativeImage } from 'electron';
+import { app, nativeImage, systemPreferences } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import screenshot from 'screenshot-desktop';
@@ -71,6 +71,13 @@ export function startScreenshotService() {
   if (screenshotInterval) return;
 
   debugLog('[Screenshot] Service starting...');
+  if (process.platform === 'darwin') {
+    try {
+      debugLog(`[Screenshot] macOS screen capture access status: ${systemPreferences.getMediaAccessStatus('screen')}`);
+    } catch (error) {
+      debugLog('[Screenshot] Failed to inspect macOS screen capture access status: ' + String(error));
+    }
+  }
   const screenshotDir = path.join(app.getPath('userData'), 'screenshots');
   if (!fs.existsSync(screenshotDir)) {
     fs.mkdirSync(screenshotDir, { recursive: true });
@@ -106,6 +113,12 @@ export function startScreenshotService() {
 
       // Compress and resize using Electron's nativeImage to occupy less storage
       const image = nativeImage.createFromBuffer(imgBuffer);
+      const imageSize = image.getSize();
+      if (image.isEmpty() || imageSize.width === 0 || imageSize.height === 0) {
+        debugLog(`[Screenshot] Capture returned an empty image (${imageSize.width}x${imageSize.height})`);
+        return;
+      }
+      debugLog(`[Screenshot] Captured display image ${imageSize.width}x${imageSize.height} (active app: ${activity.activeWindow.appName})`);
       let finalBuffer: Buffer;
 
       if (shouldBlurScreenshots) {
