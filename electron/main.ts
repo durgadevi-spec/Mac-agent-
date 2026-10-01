@@ -340,7 +340,10 @@ async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
-    fullscreen: false,
+    fullscreen: process.platform === 'darwin' && windowLocked,
+    kiosk: process.platform === 'darwin' && windowLocked,
+    alwaysOnTop: process.platform === 'darwin' && windowLocked,
+    movable: process.platform !== 'darwin' || !windowLocked,
     show: false,
     minimizable: true,
     maximizable: true,
@@ -401,19 +404,21 @@ async function createWindow() {
       clearSessionCache();
     }
 
-    // Always show, maximize, and bring to front on startup
+    // Apply the locked Mac presentation before showing the first frame.
     mainWindow?.show();
-    mainWindow?.maximize();
-    mainWindow?.focus();
     if (windowLocked) {
       if (process.platform === 'darwin') {
+        mainWindow?.setMovable(false);
         mainWindow?.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
         mainWindow?.setKiosk(true);
         mainWindow?.setFullScreen(true);
       }
       mainWindow?.setAlwaysOnTop(true, 'screen-saver');
+      mainWindow?.focus();
       syncLockedWindowFocusEnforcement();
     } else {
+      mainWindow?.maximize();
+      mainWindow?.focus();
       mainWindow?.setAlwaysOnTop(true, 'screen-saver');
       setTimeout(() => {
         if (mainWindow && !mainWindow.isDestroyed() && !windowLocked) mainWindow.setAlwaysOnTop(false);
