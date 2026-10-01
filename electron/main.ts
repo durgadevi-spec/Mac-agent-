@@ -204,6 +204,7 @@ function refocusLockedWindow() {
     if (!mainWindow.isFocused()) {
       mainWindow.setAlwaysOnTop(true, 'screen-saver');
       mainWindow.moveTop();
+      app.focus({ steal: true });
       mainWindow.focus();
     }
   } catch (error) {
