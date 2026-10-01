@@ -21,6 +21,9 @@ let screenshotInterval: NodeJS.Timeout | null = null;
 let pendingScreenshots: Array<{ employee_id: string; app_name: string; captured_at: string; screenshot_data: string; id: string }> = [];
 let currentIntervalMinutes = 3; // Default 3 minutes from settings image
 let currentEmployeeId: string | null = null;
+let initialCaptureTimer: NodeJS.Timeout | null = null;
+let captureInitialScreenshot: (() => Promise<void>) | null = null;
+let isInitialCaptureInProgress = false;
 
 let shouldBlurScreenshots = false;
 
@@ -41,14 +44,27 @@ export function updateScreenshotSettings(intervalMinutes: number, blur?: boolean
 }
 
 export function setCurrentEmployeeId(id: string | null) {
+  const wasLoggedIn = !!currentEmployeeId;
   currentEmployeeId = id;
   if (!id) {
+    if (initialCaptureTimer) clearTimeout(initialCaptureTimer);
+    initialCaptureTimer = null;
     // If logging out or ID is cleared, wipe the buffer immediately so nothing gets mixed
     pendingScreenshots = [];
     debugLog('[Screenshot] Employee logged out. Cleared pending screenshots buffer.');
   } else {
     debugLog(`[Screenshot] Employee logged in: ${id}`);
+    if (!wasLoggedIn) scheduleInitialScreenshot(1000);
   }
+}
+
+function scheduleInitialScreenshot(delayMs: number) {
+  if (!captureInitialScreenshot || !currentEmployeeId) return;
+  if (initialCaptureTimer) clearTimeout(initialCaptureTimer);
+  initialCaptureTimer = setTimeout(() => {
+    initialCaptureTimer = null;
+    void captureInitialScreenshot?.();
+  }, delayMs);
 }
 
 export function startScreenshotService() {
@@ -133,10 +149,15 @@ export function startScreenshotService() {
     }
   }, INTERVAL_MS);
 
-  // Trigger one screenshot shortly after startup (e.g. 5 seconds) to verify it works
-  setTimeout(async () => {
+  captureInitialScreenshot = async () => {
+    if (isInitialCaptureInProgress) return;
+    isInitialCaptureInProgress = true;
     try {
-      if (!currentEmployeeId) return; // Skip initial screenshot if nobody is logged in yet
+      const employeeId = currentEmployeeId;
+      if (!employeeId) {
+        debugLog('[Screenshot] Initial capture skipped: no employee logged in');
+        return;
+      }
 
       const activity = getCurrentActivity();
       // Same rule: only skip on genuine hardware idle, not on 'away' state.
@@ -171,7 +192,7 @@ export function startScreenshotService() {
       }
 
       pendingScreenshots.push({
-        employee_id: currentEmployeeId,
+        employee_id: employeeId,
         app_name: activity.activeWindow.appName,
         captured_at: now.toISOString(),
         screenshot_data: screenshotData,
@@ -180,8 +201,13 @@ export function startScreenshotService() {
       debugLog(`[Screenshot] Initial validation screen captured & compressed (${Math.round(finalBuffer.length / 1024)} KB, base64 size: ${Math.round(screenshotData.length / 1024)} KB): ${filename}`);
     } catch (error) {
       debugLog('[Screenshot] Initial capture failed: ' + String(error));
+    } finally {
+      isInitialCaptureInProgress = false;
     }
-  }, 5000);
+  };
+
+  // Capture after startup when a session is restored, or shortly after a fresh login.
+  scheduleInitialScreenshot(5000);
 
   debugLog(`[Screenshot] Service started with interval: ${currentIntervalMinutes}m`);
 
@@ -196,6 +222,9 @@ export function stopScreenshotService() {
     clearInterval(screenshotInterval);
     screenshotInterval = null;
   }
+  if (initialCaptureTimer) clearTimeout(initialCaptureTimer);
+  initialCaptureTimer = null;
+  captureInitialScreenshot = null;
   debugLog('[Screenshot] Service stopped');
 }
 
