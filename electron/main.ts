@@ -201,6 +201,18 @@ function setActiveEmployeeSession(active: boolean) {
   refreshTrayMenu?.();
 }
 
+function hasActiveEmployeeSession() {
+  if (activeEmployeeSession) return true;
+  const cached = loadSessionCache();
+  const today = new Date().toISOString().slice(0, 10);
+  return !!(
+    cached?.employee &&
+    cached?.screen === 'timer' &&
+    cached?.session?.session_date === today &&
+    !cached?.session?.day_finished
+  );
+}
+
 function refocusLockedWindow() {
   if (process.platform !== 'darwin' || !windowLocked || lockedChildWindowOpen || !mainWindow || mainWindow.isDestroyed()) return;
 
@@ -553,9 +565,9 @@ function createTray() {
     { type: 'separator' },
     {
       label: 'Exit',
-      enabled: !windowLocked && !activeEmployeeSession,
+      enabled: !windowLocked && !hasActiveEmployeeSession(),
       click: () => {
-        if (windowLocked || activeEmployeeSession) {
+        if (windowLocked || hasActiveEmployeeSession()) {
           console.warn('[Main] Ignoring tray Exit request while an employee session or lock is active');
           refocusLockedWindow();
           return;
@@ -885,7 +897,7 @@ ipcMain.handle('toggle-maximize-window', async () => {
 
 ipcMain.handle('close-window', async () => {
   try {
-    if (windowLocked) {
+    if (windowLocked || hasActiveEmployeeSession()) {
       console.warn('[Main] Ignoring close-window request while check-in is locked');
       return false;
     }
@@ -1410,7 +1422,7 @@ ipcMain.handle('stop-tracking', async () => {
 // ─── App quit ─────────────────────────────────────────────────────────────────
 
 app.on('before-quit', (event) => {
-  if (mainWindow && !mainWindow.isDestroyed() && (windowLocked || activeEmployeeSession)) {
+  if (gotLock && (windowLocked || hasActiveEmployeeSession())) {
     event.preventDefault();
     if (windowLocked) refocusLockedWindow();
     return;
