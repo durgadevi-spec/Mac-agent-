@@ -165,7 +165,7 @@ import {
   updateAppClassifications,
   setIdleModalActive,
 } from './activityMonitor.js';
-import { showIdlePromptWindow } from './idlePromptWindow.js';
+import { isIdlePromptWindowOpen, showIdlePromptWindow } from './idlePromptWindow.js';
 import {
   createFloatingTimerWindow,
   showFloatingTimer,
@@ -215,7 +215,7 @@ function hasActiveEmployeeSession() {
 }
 
 function refocusLockedWindow() {
-  if (process.platform !== 'darwin' || !windowLocked || lockedChildWindowOpen || !mainWindow || mainWindow.isDestroyed()) return;
+  if (process.platform !== 'darwin' || !windowLocked || lockedChildWindowOpen || isIdlePromptWindowOpen() || !mainWindow || mainWindow.isDestroyed()) return;
 
   try {
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -1080,20 +1080,33 @@ ipcMain.handle('open-timesheet-browser', async () => {
     timesheetWin.maximize();
     timesheetWin.webContents.on('did-finish-load', () => {
       timesheetWin.webContents.executeJavaScript(`(() => {
-        if (document.getElementById('knockturn-return-button')) return;
-        const button = document.createElement('button');
-        button.id = 'knockturn-return-button';
-        button.textContent = 'Back to Knockturn';
-        Object.assign(button.style, {
+        if (document.getElementById('knockturn-portal-actions')) return;
+        const actions = document.createElement('div');
+        actions.id = 'knockturn-portal-actions';
+        Object.assign(actions.style, {
           position: 'fixed', top: '12px', left: '12px', zIndex: '2147483647',
-          padding: '9px 14px', border: '0', borderRadius: '7px',
-          background: '#b42332', color: '#fff', font: '600 14px system-ui',
-          cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,.25)'
+          display: 'flex', flexDirection: 'column', gap: '8px'
         });
-        button.addEventListener('click', () => window.timesheetAPI?.close());
-        document.body.appendChild(button);
+
+        const makeButton = (id, label, background, onClick) => {
+          const button = document.createElement('button');
+          button.id = id;
+          button.textContent = label;
+          button.type = 'button';
+          Object.assign(button.style, {
+            padding: '9px 14px', border: '0', borderRadius: '7px',
+            background, color: '#fff', font: '600 14px system-ui',
+            cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,.25)'
+          });
+          button.addEventListener('click', onClick);
+          actions.appendChild(button);
+        };
+
+        makeButton('knockturn-home-button', 'Back to Homepage', '#b42332', () => window.timesheetAPI?.close());
+        makeButton('knockturn-pms-button', 'Add Task from PMS', '#175cd3', () => window.timesheetAPI?.openPms());
+        document.body.appendChild(actions);
       })();`).catch(error => {
-        console.error('[TimesheetIPC] Failed to inject return button:', error);
+        console.error('[TimesheetIPC] Failed to inject portal action buttons:', error);
       });
     });
     timesheetWin.once('closed', () => {
@@ -1119,6 +1132,21 @@ ipcMain.handle('close-timesheet-browser', async (event) => {
   }
   timesheetWindow.close();
   return true;
+});
+
+ipcMain.handle('open-pms-from-timesheet', async (event) => {
+  if (!timesheetWindow || timesheetWindow.isDestroyed() || event.sender !== timesheetWindow.webContents) {
+    return false;
+  }
+  try {
+    await timesheetWindow.loadURL('https://effilynx.in/');
+    timesheetWindow.show();
+    timesheetWindow.focus();
+    return true;
+  } catch (error) {
+    console.error('[TimesheetIPC] Failed to open PMS from timesheet window:', error);
+    return false;
+  }
 });
 
 ipcMain.handle('lock-system', async () => {
