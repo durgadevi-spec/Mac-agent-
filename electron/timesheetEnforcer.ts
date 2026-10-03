@@ -47,16 +47,18 @@ export async function fetchAppSettings() {
 
 export function getPreviousWorkingDate(): string | null {
   const now = new Date();
-  const dayOfWeek = now.getDay();
-  if (dayOfWeek === 0) return null; // Sunday
-  if (dayOfWeek === 1) { // Monday -> Saturday
-    const sat = new Date(now);
-    sat.setDate(sat.getDate() - 2);
-    return sat.toISOString().slice(0, 10);
-  }
-  const prev = new Date(now);
-  prev.setDate(prev.getDate() - 1);
-  return prev.toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const dateParts = Object.fromEntries(parts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+  const today = new Date(Date.UTC(Number(dateParts.year), Number(dateParts.month) - 1, Number(dateParts.day)));
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(now);
+  if (weekday === 'Sun') return null;
+  today.setUTCDate(today.getUTCDate() - (weekday === 'Mon' ? 2 : 1));
+  return today.toISOString().slice(0, 10);
 }
 
 export async function checkLeaveStatus(empCode: string, dateStr: string): Promise<{
@@ -347,35 +349,43 @@ export async function startTimesheetEnforcer(empCode: string, mainWindow: Browse
     if (currentEmployee.timesheet_exempt) return; // Exempt bypass
     if (appSettings['enable_lock_screen_enforcement'] !== 'true') return; // Globally disabled
 
-    const prevDate = getPreviousWorkingDate();
-    if (!prevDate) return; // Sunday bypass
-
-    const leaveStatus = await checkLeaveStatus(currentEmployee.employee_code, prevDate);
-    if (leaveStatus.isOnLeave) {
-      console.log('[TimesheetEnforcer] Leave bypass for', currentEmployee.employee_code, prevDate, 'Reason:', leaveStatus.reason);
-      return; // Leave bypass
-    }
-
     const todayDate = new Date().toISOString().slice(0, 10);
     const manualOverride = await getManualOverrideState(currentEmployee.id, todayDate);
-    
     console.log('[TimesheetEnforcer] Manual override state for', currentEmployee.employee_code, currentEmployee.id, todayDate, '=>', manualOverride);
     if (manualOverride === 'ERROR') {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('timesheet-lock', { date: prevDate, manual: true, verificationUnavailable: true });
+        mainWindow.webContents.send('timesheet-lock', { date: todayDate, manual: true, verificationUnavailable: true });
       }
       return; // Fail closed when admin lock state cannot be verified
     }
     if (manualOverride === 'LOCKED') {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('timesheet-lock', { date: prevDate, manual: true });
+        mainWindow.webContents.send('timesheet-lock', { date: todayDate, manual: true });
       }
-      return; // Manually locked by admin
-    } else if (manualOverride === 'UNLOCKED_TODAY') {
+      return; // A manual admin lock overrides Sunday/leave bypasses
+    }
+    if (manualOverride === 'UNLOCKED_TODAY') {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('timesheet-unlock');
       }
       return; // Manually unlocked today
+    }
+
+    const prevDate = getPreviousWorkingDate();
+    if (!prevDate) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('timesheet-unlock');
+      }
+      return; // Sunday bypass
+    }
+
+    const leaveStatus = await checkLeaveStatus(currentEmployee.employee_code, prevDate);
+    if (leaveStatus.isOnLeave) {
+      console.log('[TimesheetEnforcer] Leave bypass for', currentEmployee.employee_code, prevDate, 'Reason:', leaveStatus.reason);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('timesheet-unlock');
+      }
+      return; // Leave bypass
     }
 
     const isSubmitted = await checkTimesheetSubmitted(currentEmployee.employee_code, prevDate);

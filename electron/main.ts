@@ -182,7 +182,7 @@ import {
   setCurrentEmployeeId,
 } from './screenshotService.js';
 import { startDailyScheduler, stopDailyScheduler, triggerDailySummaryEmails } from './dailyScheduler.js';
-import { startTimesheetEnforcer, stopTimesheetEnforcer, checkTimesheetSubmitted, getPreviousWorkingDate, setTimesheetDbUrlGetter, getComplianceDetails, verifyManualLockForEmployee } from './timesheetEnforcer.js';
+import { startTimesheetEnforcer, stopTimesheetEnforcer, checkTimesheetSubmitted, checkLeaveStatus, getPreviousWorkingDate, setTimesheetDbUrlGetter, getComplianceDetails, verifyManualLockForEmployee } from './timesheetEnforcer.js';
 
 // Export getTimesheetDbUrl for use in other modules
 export { getTimesheetDbUrl };
@@ -193,6 +193,9 @@ let tray: Tray | null = null;
 let isQuitting = false;
 let windowLocked = true;
 let activeEmployeeSession = false;
+let dailyStartupSkipReason: string | null = null;
+let startupSkipCheckInterval: NodeJS.Timeout | null = null;
+let isStartingAgentWindow = false;
 let lockedChildWindowOpen = false;
 let refreshTrayMenu: (() => void) | null = null;
 let lockedWindowFocusInterval: NodeJS.Timeout | null = null;
@@ -203,6 +206,7 @@ function setActiveEmployeeSession(active: boolean) {
 }
 
 function hasActiveEmployeeSession() {
+  if (dailyStartupSkipReason) return false;
   if (activeEmployeeSession) return true;
   const cached = loadSessionCache();
   const today = new Date().toISOString().slice(0, 10);
@@ -253,10 +257,42 @@ function syncLockedWindowFocusEnforcement() {
 
 // Session persistence path
 const sessionCachePath = path.join(app.getPath('userData'), 'session-cache.json');
+const lastEmployeeCodePath = path.join(app.getPath('userData'), 'last-employee-code.txt');
+let dailySkipCheckInterval: NodeJS.Timeout | null = null;
+let isCheckingAgentStart = false;
+let hasStartedAgentForDay = false;
+
+function getIndiaWorkDate() {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(now);
+  return { date: `${values.year}-${values.month}-${values.day}`, weekday };
+}
+
+function getLastEmployeeCode(): string | null {
+  try {
+    const cachedCode = loadSessionCache()?.employee?.employee_code;
+    if (cachedCode) return cachedCode;
+    if (fs.existsSync(lastEmployeeCodePath)) {
+      return fs.readFileSync(lastEmployeeCodePath, 'utf8').trim() || null;
+    }
+  } catch (error) {
+    console.warn('[Startup] Could not read saved employee identity:', error);
+  }
+  return process.env.EMPLOYEE_CODE || null;
+}
 
 function saveSessionCache(data: any) {
   try {
     fs.writeFileSync(sessionCachePath, JSON.stringify(data), 'utf8');
+    const employeeCode = data?.employee?.employee_code;
+    if (employeeCode) fs.writeFileSync(lastEmployeeCodePath, employeeCode, 'utf8');
     if (data?.employee) setActiveEmployeeSession(!data.session?.day_finished);
   } catch { }
 }
@@ -332,6 +368,8 @@ app.on('second-instance', () => {
   if (mainWindow) {
     mainWindow.show();
     mainWindow.focus();
+  } else {
+    void startAgentIfAllowed();
   }
 });
 
@@ -621,6 +659,69 @@ function stopFloatingTimerUpdates() {
   }
 }
 
+async function getDailyStartupSkipReason(): Promise<string | null> {
+  const { date, weekday } = getIndiaWorkDate();
+  if (weekday === 'Sun') return 'Sunday';
+
+  const employeeCode = getLastEmployeeCode();
+  if (!employeeCode) return null;
+
+  const leaveStatus = await checkLeaveStatus(employeeCode, date);
+  if (leaveStatus.isOnLeave && leaveStatus.leaveType !== 'Permission') {
+    return leaveStatus.reason || `Approved leave/OD (${leaveStatus.leaveType || 'Leave'})`;
+  }
+  return null;
+}
+
+async function startAgentIfAllowed() {
+  if (!gotLock || isStartingAgentWindow) return;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
+
+  isStartingAgentWindow = true;
+  try {
+    const skipReason = await getDailyStartupSkipReason();
+    if (skipReason) {
+      dailyStartupSkipReason = skipReason;
+      windowLocked = false;
+      setActiveEmployeeSession(false);
+      console.log(`[Startup] Suppressing agent window for today: ${skipReason}`);
+      if (!startupSkipCheckInterval) {
+        startupSkipCheckInterval = setInterval(() => {
+          void startAgentIfAllowed();
+        }, 5 * 60 * 1000);
+      }
+      return;
+    }
+
+    dailyStartupSkipReason = null;
+    if (startupSkipCheckInterval) {
+      clearInterval(startupSkipCheckInterval);
+      startupSkipCheckInterval = null;
+    }
+
+    windowLocked = true;
+    await createWindow();
+    createFloatingTimerWindow();
+    try { createTray(); } catch (error) { console.error('[Startup] Tray creation failed:', error); }
+    registerWindowsStartup();
+    startLocalServer();
+    startScreenshotService();
+    startDailyScheduler();
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.session.preconnect({ url: 'https://ogqmojvzeyasqoqhkpuz.supabase.co' });
+    }
+  } catch (error) {
+    console.error('[Startup] Failed to evaluate day eligibility/start agent:', error);
+  } finally {
+    isStartingAgentWindow = false;
+  }
+}
+
 // ─── App ready ────────────────────────────────────────────────────────────────
 app.on('ready', async () => {
   if (!gotLock) return;
@@ -631,29 +732,8 @@ app.on('ready', async () => {
 
   // Initialize timesheet enforcer with URL getter
   setTimesheetDbUrlGetter(getTimesheetDbUrl);
-
-  await createWindow();
-
-  // Create the floating timer window (hidden until session starts)
-  createFloatingTimerWindow();
-
-  try { createTray(); } catch (e) { console.error('Tray creation failed:', e); }
-
-  // Register Windows startup
   registerWindowsStartup();
-
-  // Start local fallback server
-  startLocalServer();
-
-  // Start background screenshot service
-  startScreenshotService();
-
-  // Start daily summary email scheduler
-  startDailyScheduler();
-
-  if (mainWindow) {
-    mainWindow.webContents.session.preconnect({ url: 'https://ogqmojvzeyasqoqhkpuz.supabase.co' });
-  }
+  await startAgentIfAllowed();
 });
 
 app.on('window-all-closed', () => {
@@ -662,7 +742,7 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (mainWindow === null) {
-    createWindow();
+    void startAgentIfAllowed();
   } else {
     mainWindow.show();
     mainWindow.focus();
