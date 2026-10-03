@@ -1421,12 +1421,20 @@ ipcMain.handle('stop-tracking', async () => {
 
 // ─── App quit ─────────────────────────────────────────────────────────────────
 
-app.on('before-quit', (event) => {
-  if (gotLock && (windowLocked || hasActiveEmployeeSession())) {
+function preventQuitDuringEmployeeSession(event: Electron.Event, source: string) {
+  const activeSession = hasActiveEmployeeSession();
+  const shouldBlock = gotLock && (windowLocked || activeSession);
+  console.info(`[Main] ${source}: locked=${windowLocked}, activeSession=${activeSession}, blockQuit=${shouldBlock}`);
+  if (shouldBlock) {
     event.preventDefault();
     if (windowLocked) refocusLockedWindow();
-    return;
+    return true;
   }
+  return false;
+}
+
+app.on('before-quit', (event) => {
+  if (preventQuitDuringEmployeeSession(event, 'before-quit')) return;
   if (lockedWindowFocusInterval) clearInterval(lockedWindowFocusInterval);
   lockedWindowFocusInterval = null;
   isQuitting = true;
@@ -1435,6 +1443,10 @@ app.on('before-quit', (event) => {
   stopLocalServer();
   stopScreenshotService();
   stopDailyScheduler();
+});
+
+app.on('will-quit', (event) => {
+  preventQuitDuringEmployeeSession(event, 'will-quit');
 });
 
 export { mainWindow };
