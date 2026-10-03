@@ -188,6 +188,7 @@ import { startTimesheetEnforcer, stopTimesheetEnforcer, checkTimesheetSubmitted,
 export { getTimesheetDbUrl };
 
 let mainWindow: BrowserWindow | null = null;
+let timesheetWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let windowLocked = true;
@@ -1045,6 +1046,12 @@ ipcMain.handle('open-timesheet-browser', async () => {
   }
 
   try {
+    if (timesheetWindow && !timesheetWindow.isDestroyed()) {
+      timesheetWindow.show();
+      timesheetWindow.focus();
+      return true;
+    }
+
     lockedChildWindowOpen = windowLocked;
     const timesheetWin = new BrowserWindow({
       width: 1000,
@@ -1054,10 +1061,12 @@ ipcMain.handle('open-timesheet-browser', async () => {
       autoHideMenuBar: true,
       show: true,
       webPreferences: {
+        preload: path.join(app.getAppPath(), 'electron', 'timesheetPreload.cjs'),
         nodeIntegration: false,
         contextIsolation: true
       }
     });
+    timesheetWindow = timesheetWin;
 
     // Position it slightly off-center if there's a main window so it feels like a modal overlay
     if (mainWindow) {
@@ -1069,7 +1078,26 @@ ipcMain.handle('open-timesheet-browser', async () => {
 
     timesheetWin.loadURL(timesheetUrl);
     timesheetWin.maximize();
+    timesheetWin.webContents.on('did-finish-load', () => {
+      timesheetWin.webContents.executeJavaScript(`(() => {
+        if (document.getElementById('knockturn-return-button')) return;
+        const button = document.createElement('button');
+        button.id = 'knockturn-return-button';
+        button.textContent = 'Back to Knockturn';
+        Object.assign(button.style, {
+          position: 'fixed', top: '12px', left: '12px', zIndex: '2147483647',
+          padding: '9px 14px', border: '0', borderRadius: '7px',
+          background: '#b42332', color: '#fff', font: '600 14px system-ui',
+          cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,.25)'
+        });
+        button.addEventListener('click', () => window.timesheetAPI?.close());
+        document.body.appendChild(button);
+      })();`).catch(error => {
+        console.error('[TimesheetIPC] Failed to inject return button:', error);
+      });
+    });
     timesheetWin.once('closed', () => {
+      if (timesheetWindow === timesheetWin) timesheetWindow = null;
       lockedChildWindowOpen = false;
       if (windowLocked) {
         mainWindow?.show();
@@ -1078,10 +1106,19 @@ ipcMain.handle('open-timesheet-browser', async () => {
     });
     return true;
   } catch (error) {
+    timesheetWindow = null;
     lockedChildWindowOpen = false;
     console.error('[TimesheetIPC] open-timesheet-browser failed:', error);
     return false;
   }
+});
+
+ipcMain.handle('close-timesheet-browser', async (event) => {
+  if (!timesheetWindow || timesheetWindow.isDestroyed() || event.sender !== timesheetWindow.webContents) {
+    return false;
+  }
+  timesheetWindow.close();
+  return true;
 });
 
 ipcMain.handle('lock-system', async () => {
