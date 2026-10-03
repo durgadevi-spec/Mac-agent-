@@ -5,10 +5,11 @@ import { Employee } from '../lib/supabase';
 interface Props {
   employee: Employee;
   date: string;
+  manualLock?: boolean;
   onUnlocked: () => void;
 }
 
-export default function TimesheetLockScreen({ employee, date, onUnlocked }: Props) {
+export default function TimesheetLockScreen({ employee, date, manualLock = false, onUnlocked }: Props) {
   const [verifying, setVerifying] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -28,6 +29,20 @@ export default function TimesheetLockScreen({ employee, date, onUnlocked }: Prop
     setVerifying(true);
     setErrorMsg('');
     try {
+      const manualStatus = await (window as any).electronAPI?.verifyManualLockRealtime?.(employee.employee_code);
+      if (!manualStatus?.verified) {
+        setErrorMsg('Unable to verify the administrator lock right now. Please contact your administrator; the system will remain locked.');
+        return;
+      }
+      if (manualStatus.locked) {
+        setErrorMsg('This system was manually locked by your administrator. Please contact your administrator to request an unlock.');
+        return;
+      }
+      if (manualStatus.adminUnlocked) {
+        onUnlocked();
+        return;
+      }
+
       const result = await (window as any).electronAPI?.verifyTimesheetRealtime?.(employee.employee_code);
       if (result?.submitted) {
         onUnlocked();
@@ -53,11 +68,14 @@ export default function TimesheetLockScreen({ employee, date, onUnlocked }: Prop
           <AlertTriangle className="w-10 h-10 text-red-600" />
         </div>
         
-        <h1 className="text-3xl font-bold text-slate-900 mb-4">System Locked</h1>
+        <h1 className="text-3xl font-bold text-slate-900 mb-4">
+          {manualLock ? 'Manually Locked by Admin' : 'System Locked'}
+        </h1>
         
         <p className="text-lg text-slate-600 mb-8">
-          Your system has been locked because your timesheet for <strong>{date}</strong> has not been submitted.
-          Please submit your timesheet or contact HR/IT Support.
+          {manualLock
+            ? 'Your administrator has manually locked this system. Please contact your administrator to request an unlock.'
+            : <>Your system has been locked because your timesheet for <strong>{date}</strong> has not been submitted. Please submit your timesheet or contact HR/IT Support.</>}
         </p>
 
         {errorMsg && (
@@ -81,7 +99,7 @@ export default function TimesheetLockScreen({ employee, date, onUnlocked }: Prop
             className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-4 rounded-xl font-semibold transition-colors text-lg shadow-sm disabled:opacity-50"
           >
             {verifying ? <RefreshCw className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
-            {verifying ? 'Verifying...' : 'Back & Continue'}
+            {verifying ? 'Verifying...' : manualLock ? 'Verify Admin Unlock' : 'Back & Continue'}
           </button>
 
           <button

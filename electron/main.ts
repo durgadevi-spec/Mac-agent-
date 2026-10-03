@@ -182,7 +182,7 @@ import {
   setCurrentEmployeeId,
 } from './screenshotService.js';
 import { startDailyScheduler, stopDailyScheduler, triggerDailySummaryEmails } from './dailyScheduler.js';
-import { startTimesheetEnforcer, stopTimesheetEnforcer, checkTimesheetSubmitted, getPreviousWorkingDate, setTimesheetDbUrlGetter, getComplianceDetails } from './timesheetEnforcer.js';
+import { startTimesheetEnforcer, stopTimesheetEnforcer, checkTimesheetSubmitted, getPreviousWorkingDate, setTimesheetDbUrlGetter, getComplianceDetails, verifyManualLockForEmployee } from './timesheetEnforcer.js';
 
 // Export getTimesheetDbUrl for use in other modules
 export { getTimesheetDbUrl };
@@ -1026,6 +1026,10 @@ ipcMain.handle('verify-timesheet-realtime', async (_, employeeCode: string) => {
     console.error('[TimesheetIPC] verify-timesheet-realtime failed:', error);
     return { submitted: false };
   }
+});
+
+ipcMain.handle('verify-manual-lock-realtime', async (_, employeeCode: string) => {
+  return verifyManualLockForEmployee(employeeCode);
 });
 
 ipcMain.handle('get-compliance-details', async (_, employeeCode: string, empId: string, dateStr: string) => {

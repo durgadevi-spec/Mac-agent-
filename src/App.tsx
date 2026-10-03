@@ -26,6 +26,7 @@ export default function App() {
   const [punchConfirmed, setPunchConfirmed] = useState(false);
   const [timesheetReminderDate, setTimesheetReminderDate] = useState<string | null>(null);
   const [timesheetLockedDate, setTimesheetLockedDate] = useState<string | null>(null);
+  const [timesheetLockManual, setTimesheetLockManual] = useState(false);
   const waterTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const api = () => (window as any).electronAPI;
@@ -316,10 +317,11 @@ export default function App() {
       });
     }
     if (eApi && eApi.onTimesheetLock) {
-      eApi.onTimesheetLock((data: { date: string }) => {
+      eApi.onTimesheetLock((data: { date: string; manual?: boolean; verificationUnavailable?: boolean }) => {
         console.log('[App] Received timesheet lock event', data);
         if (data && data.date) {
           setTimesheetLockedDate(data.date);
+          setTimesheetLockManual(!!data.manual);
           // Auto-enter kiosk via state effect (but already handled by electron enforcer sending lock? Wait, electron sends the signal. Let's make sure window is locked in React state)
           setWindowLocked(true);
         }
@@ -329,6 +331,7 @@ export default function App() {
       eApi.onTimesheetUnlock(() => {
         console.log('[App] Received timesheet unlock event');
         setTimesheetLockedDate(null);
+        setTimesheetLockManual(false);
       });
     }
   }, []);
@@ -467,7 +470,11 @@ export default function App() {
       <TimesheetLockScreen
         employee={employee}
         date={timesheetLockedDate}
-        onUnlocked={() => setTimesheetLockedDate(null)}
+        manualLock={timesheetLockManual}
+        onUnlocked={() => {
+          setTimesheetLockedDate(null);
+          setTimesheetLockManual(false);
+        }}
       />
     );
   }

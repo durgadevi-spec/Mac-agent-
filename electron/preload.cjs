@@ -109,6 +109,7 @@ const electronAPI = {
   },
   openTimesheetBrowser: () => ipcRenderer.invoke('open-timesheet-browser'),
   verifyTimesheetRealtime: (empCode) => ipcRenderer.invoke('verify-timesheet-realtime', empCode),
+  verifyManualLockRealtime: (empCode) => ipcRenderer.invoke('verify-manual-lock-realtime', empCode),
   getComplianceDetails: (empCode, empId, dateStr) => ipcRenderer.invoke('get-compliance-details', empCode, empId, dateStr),
   lockSystem: () => ipcRenderer.invoke('lock-system'),
 };

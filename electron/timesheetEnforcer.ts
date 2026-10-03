@@ -195,7 +195,7 @@ export async function checkTimesheetSubmitted(empCode: string, dateStr: string):
   }
 }
 
-export async function getManualOverrideState(empId: string, todayDateStr: string): Promise<'LOCKED' | 'UNLOCKED_TODAY' | 'NONE'> {
+export async function getManualOverrideState(empId: string, todayDateStr: string): Promise<'LOCKED' | 'UNLOCKED_TODAY' | 'NONE' | 'ERROR'> {
   try {
     const { data, error } = await supabase
       .from('timesheet_lock_logs')
@@ -207,7 +207,7 @@ export async function getManualOverrideState(empId: string, todayDateStr: string
 
     if (error) {
       console.error('[TimesheetEnforcer] Error checking manual override:', error);
-      return 'NONE';
+      return 'ERROR';
     }
 
     if (data && data.length > 0) {
@@ -215,18 +215,49 @@ export async function getManualOverrideState(empId: string, todayDateStr: string
       const eventTime = new Date(latestEvent.created_at).getTime();
       const now = Date.now();
       
-      // If the manual event was within the last 18 hours, consider it valid for today
-      if (now - eventTime < 18 * 60 * 60 * 1000) {
-        if (latestEvent.event_type === 'MANUAL_LOCK') {
-          return 'LOCKED';
-        } else if (latestEvent.event_type === 'MANUAL_UNLOCK') {
-          return 'UNLOCKED_TODAY';
-        }
+      if (latestEvent.event_type === 'MANUAL_LOCK') {
+        return 'LOCKED';
+      }
+      // Admin unlock is a same-day override; a later manual lock remains effective
+      // until another admin unlock event is recorded.
+      if (latestEvent.event_type === 'MANUAL_UNLOCK' && now - eventTime < 18 * 60 * 60 * 1000) {
+        return 'UNLOCKED_TODAY';
       }
     }
     return 'NONE';
   } catch (err) {
-    return 'NONE';
+    console.error('[TimesheetEnforcer] Unexpected manual override check failure:', err);
+    return 'ERROR';
+  }
+}
+
+export async function verifyManualLockForEmployee(employeeCode: string): Promise<{
+  verified: boolean;
+  locked: boolean;
+  adminUnlocked: boolean;
+}> {
+  try {
+    const { data: employee, error } = await supabase
+      .from('employees')
+      .select('id')
+      .eq('employee_code', employeeCode)
+      .maybeSingle();
+
+    if (error || !employee?.id) {
+      console.error('[TimesheetEnforcer] Unable to resolve employee for manual-lock check:', error);
+      return { verified: false, locked: true, adminUnlocked: false };
+    }
+
+    const state = await getManualOverrideState(employee.id, new Date().toISOString().slice(0, 10));
+    if (state === 'ERROR') return { verified: false, locked: true, adminUnlocked: false };
+    return {
+      verified: true,
+      locked: state === 'LOCKED',
+      adminUnlocked: state === 'UNLOCKED_TODAY',
+    };
+  } catch (error) {
+    console.error('[TimesheetEnforcer] Manual-lock verification failed:', error);
+    return { verified: false, locked: true, adminUnlocked: false };
   }
 }
 
@@ -327,6 +358,12 @@ export async function startTimesheetEnforcer(empCode: string, mainWindow: Browse
     const manualOverride = await getManualOverrideState(currentEmployee.id, todayDate);
     
     console.log('[TimesheetEnforcer] Manual override state for', currentEmployee.employee_code, currentEmployee.id, todayDate, '=>', manualOverride);
+    if (manualOverride === 'ERROR') {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('timesheet-lock', { date: prevDate, manual: true, verificationUnavailable: true });
+      }
+      return; // Fail closed when admin lock state cannot be verified
+    }
     if (manualOverride === 'LOCKED') {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('timesheet-lock', { date: prevDate, manual: true });

@@ -1,4 +1,4 @@
-import { BrowserWindow, screen, ipcMain } from 'electron';
+import { app, BrowserWindow, screen, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import isDev from 'electron-is-dev';
@@ -8,6 +8,24 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let idleWindow: BrowserWindow | null = null;
+
+export function isIdlePromptWindowOpen() {
+  return !!idleWindow && !idleWindow.isDestroyed();
+}
+
+function focusIdlePromptWindow() {
+  if (!idleWindow || idleWindow.isDestroyed()) return;
+  try {
+    idleWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    idleWindow.setAlwaysOnTop(true, 'screen-saver');
+    idleWindow.show();
+    idleWindow.moveTop();
+    app.focus({ steal: true });
+    idleWindow.focus();
+  } catch (error) {
+    console.error('[IdlePrompt] Failed to bring idle prompt above fullscreen apps:', error);
+  }
+}
 
 async function resolveStartUrl() {
   const localUrl = 'http://localhost:5013';
@@ -27,8 +45,7 @@ async function resolveStartUrl() {
 
 export async function showIdlePromptWindow(idleStartTimeMs: number) {
   if (idleWindow && !idleWindow.isDestroyed()) {
-    idleWindow.show();
-    idleWindow.focus();
+    focusIdlePromptWindow();
     return;
   }
 
@@ -50,7 +67,7 @@ export async function showIdlePromptWindow(idleStartTimeMs: number) {
     skipTaskbar: true,
     transparent: true,
     focusable: true,
-    show: true,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
@@ -62,10 +79,13 @@ export async function showIdlePromptWindow(idleStartTimeMs: number) {
   const startUrl = await resolveStartUrl();
   // Pass the start time as a query parameter
   await idleWindow.loadURL(`${startUrl}#/idle-prompt?start=${idleStartTimeMs}`);
-  idleWindow.focus();
-  idleWindow.setAlwaysOnTop(true, 'screen-saver');
+  focusIdlePromptWindow();
 
   idleWindow.on('closed', () => {
+    if (idleWindow && !idleWindow.isDestroyed()) {
+      idleWindow.setVisibleOnAllWorkspaces(false);
+      idleWindow.setAlwaysOnTop(false);
+    }
     idleWindow = null;
     setIdleModalActive(false);
   });
