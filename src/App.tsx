@@ -25,6 +25,7 @@ export default function App() {
   const [summarySubmitted, setSummarySubmitted] = useState(false);
   const [punchConfirmed, setPunchConfirmed] = useState(false);
   const [timesheetReminderDate, setTimesheetReminderDate] = useState<string | null>(null);
+  const [timesheetWarning, setTimesheetWarning] = useState<{ date: string; lockTime: string } | null>(null);
   const [timesheetLockedDate, setTimesheetLockedDate] = useState<string | null>(null);
   const [timesheetLockManual, setTimesheetLockManual] = useState(false);
   const waterTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -316,6 +317,14 @@ export default function App() {
         }
       });
     }
+    if (eApi && eApi.onTimesheetWarning) {
+      eApi.onTimesheetWarning((data: { date: string; lockTime: string; manual?: boolean }) => {
+        console.log('[App] Received timesheet warning', data);
+        if (data?.date && data.lockTime && !data.manual) {
+          setTimesheetWarning({ date: data.date, lockTime: data.lockTime });
+        }
+      });
+    }
     if (eApi && eApi.onTimesheetLock) {
       eApi.onTimesheetLock((data: { date: string; manual?: boolean; verificationUnavailable?: boolean }) => {
         console.log('[App] Received timesheet lock event', data);
@@ -481,24 +490,45 @@ export default function App() {
 
   if (screen === 'timer' && employee && session) {
     return (
-      <TimerScreen
-        employee={employee}
-        session={session}
-        showWaterReminder={showWaterReminder}
-        onDismissWater={() => setShowWaterReminder(false)}
-        onLogout={handleLogout}
-      />
+      <>
+        <TimerScreen
+          employee={employee}
+          session={session}
+          showWaterReminder={showWaterReminder}
+          onDismissWater={() => setShowWaterReminder(false)}
+          onLogout={handleLogout}
+        />
+        {timesheetWarning && !timesheetLockedDate && (
+          <TimesheetReminderModal
+            date={timesheetWarning.date}
+            lockTime={timesheetWarning.lockTime}
+            onDismiss={() => setTimesheetWarning(null)}
+          />
+        )}
+        {!timesheetWarning && timesheetReminderDate && !timesheetLockedDate && (
+          <TimesheetReminderModal
+            date={timesheetReminderDate}
+            onDismiss={() => setTimesheetReminderDate(null)}
+          />
+        )}
+      </>
     );
   }
 
   return (
     <>
-      {timesheetReminderDate && !timesheetLockedDate && (
+      {timesheetWarning && !timesheetLockedDate ? (
+        <TimesheetReminderModal
+          date={timesheetWarning.date}
+          lockTime={timesheetWarning.lockTime}
+          onDismiss={() => setTimesheetWarning(null)}
+        />
+      ) : timesheetReminderDate && !timesheetLockedDate ? (
         <TimesheetReminderModal
           date={timesheetReminderDate}
           onDismiss={() => setTimesheetReminderDate(null)}
         />
-      )}
+      ) : null}
     </>
   );
 }

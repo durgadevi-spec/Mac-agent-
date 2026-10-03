@@ -5,6 +5,7 @@ import { supabase } from '../src/lib/supabase.js';
 let enforcerInterval: NodeJS.Timeout | null = null;
 let currentEmployee: any = null;
 let lockSubscription: any = null;
+let lastTimesheetWarningDate = '';
 let appSettings: Record<string, string> = {
   timesheet_check_time: '11:00',
   timesheet_warning_time: '11:30',
@@ -322,6 +323,7 @@ export async function getComplianceDetails(empCode: string, empId: string, dateS
 
 export async function startTimesheetEnforcer(empCode: string, mainWindow: BrowserWindow | null) {
   console.log('[TimesheetEnforcer] Starting enforcer for employee code:', empCode);
+  lastTimesheetWarningDate = '';
   if (enforcerInterval) clearInterval(enforcerInterval);
   if (lockSubscription) {
     supabase.removeChannel(lockSubscription);
@@ -405,9 +407,13 @@ export async function startTimesheetEnforcer(empCode: string, mainWindow: Browse
         mainWindow.webContents.send('timesheet-lock', { date: prevDate });
       }
     } else if (currentMins >= warnMins) {
-      // TRIGGER WARNING POPUP
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('timesheet-warning', { date: prevDate });
+      // Warn once per previous-workday, even though rules are evaluated every minute.
+      if (lastTimesheetWarningDate !== prevDate && mainWindow && !mainWindow.isDestroyed()) {
+        lastTimesheetWarningDate = prevDate;
+        mainWindow.webContents.send('timesheet-warning', {
+          date: prevDate,
+          lockTime: appSettings['timesheet_lock_time'],
+        });
       }
     } else if (currentMins >= checkMins) {
       // Initial Check - Maybe send a status or a native notification

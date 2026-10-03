@@ -98,6 +98,9 @@ const electronAPI = {
   onTimesheetReminder: (callback) => {
     ipcRenderer.on('timesheet-reminder', (_event, data) => callback(data));
   },
+  onTimesheetWarning: (callback) => {
+    ipcRenderer.on('timesheet-warning', (_event, data) => callback(data));
+  },
   onTimesheetStatus: (callback) => {
     ipcRenderer.on('timesheet-status', (_event, data) => callback(data));
   },

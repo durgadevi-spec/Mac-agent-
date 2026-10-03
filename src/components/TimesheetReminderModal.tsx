@@ -3,9 +3,10 @@ import { ClipboardList } from 'lucide-react';
 interface TimesheetReminderModalProps {
   onDismiss: () => void;
   date: string;
+  lockTime?: string;
 }
 
-export default function TimesheetReminderModal({ onDismiss, date }: TimesheetReminderModalProps) {
+export default function TimesheetReminderModal({ onDismiss, date, lockTime }: TimesheetReminderModalProps) {
   return (
     <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
       <div className="bg-white rounded-3xl shadow-2xl border border-rose-100 p-8 max-w-sm w-full text-center animate-[pop_0.3s_ease-out]">
@@ -14,8 +15,10 @@ export default function TimesheetReminderModal({ onDismiss, date }: TimesheetRem
         </div>
         <h2 className="text-xl font-bold text-gray-800 mb-2">Timesheet Reminder</h2>
         <p className="text-gray-600 text-sm mb-6">
-          You didn't submit the timesheet for <span className="font-semibold text-rose-600">{date}</span>. 
-          Please go and submit it!
+          You haven&apos;t submitted the timesheet for <span className="font-semibold text-rose-600">{date}</span>.
+          {lockTime
+            ? <> The system will lock at <span className="font-semibold text-rose-600">{lockTime}</span>. Please submit your timesheet before then.</>
+            : ' Please go and submit it!'}
         </p>
         <button
           onClick={onDismiss}
