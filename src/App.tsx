@@ -454,7 +454,7 @@ export default function App() {
   }
 
   if (screen === 'admin') {
-    return <AdminMonitoringScreen onLogout={handleLogout} />;
+    return <AdminMonitoringScreen onLogout={handleLogout} adminEmployeeCode={employee?.employee_code || ''} />;
   }
 
   if (screen === 'plan' && employee) {

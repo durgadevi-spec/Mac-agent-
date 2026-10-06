@@ -1,8 +1,10 @@
-import { app, BrowserWindow, ipcMain, Menu, Notification, Tray, nativeImage, powerMonitor, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, Notification, Tray, nativeImage, powerMonitor, safeStorage, shell } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
+import { randomBytes, randomUUID } from 'crypto';
+import { hostname } from 'os';
 import isDev from 'electron-is-dev';
 import dotenv from 'dotenv';
 import pg from 'pg';
@@ -193,6 +195,9 @@ let tray: Tray | null = null;
 let isQuitting = false;
 let windowLocked = true;
 let activeEmployeeSession = false;
+let remoteAgentCloseAuthorized = false;
+let macAgentControlPollInterval: NodeJS.Timeout | null = null;
+let macAgentControlPollInProgress = false;
 let dailyStartupSkipReason: string | null = null;
 let startupSkipCheckInterval: NodeJS.Timeout | null = null;
 let isStartingAgentWindow = false;
@@ -257,6 +262,93 @@ function syncLockedWindowFocusEnforcement() {
 
 // Session persistence path
 const sessionCachePath = path.join(app.getPath('userData'), 'session-cache.json');
+const macAgentControlCredentialsPath = path.join(app.getPath('userData'), 'mac-agent-control.bin');
+
+interface MacAgentControlCredentials {
+  deviceId: string;
+  employeeCode: string;
+  token: string;
+}
+
+function loadMacAgentControlCredentials(): MacAgentControlCredentials | null {
+  if (process.platform !== 'darwin' || !safeStorage.isEncryptionAvailable()) return null;
+  try {
+    if (!fs.existsSync(macAgentControlCredentialsPath)) return null;
+    return JSON.parse(safeStorage.decryptString(fs.readFileSync(macAgentControlCredentialsPath)));
+  } catch (error) {
+    console.error('[MacAgentControl] Could not read encrypted device credentials:', error);
+    return null;
+  }
+}
+
+function saveMacAgentControlCredentials(credentials: MacAgentControlCredentials) {
+  if (!safeStorage.isEncryptionAvailable()) throw new Error('macOS secure storage is unavailable');
+  fs.writeFileSync(macAgentControlCredentialsPath, safeStorage.encryptString(JSON.stringify(credentials)), { mode: 0o600 });
+}
+
+async function callMacAgentControl(body: Record<string, unknown>, token?: string) {
+  const projectUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  const anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!projectUrl || !anonKey) throw new Error('Supabase Mac Agent Control configuration is missing');
+
+  const response = await fetch(`${projectUrl.replace(/\/$/, '')}/functions/v1/mac-agent-control`, {
+    method: 'POST',
+    headers: {
+      apikey: anonKey,
+      Authorization: `Bearer ${token || anonKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || `Mac Agent Control failed (${response.status})`);
+  return result;
+}
+
+async function pollMacAgentControl() {
+  if (process.platform !== 'darwin' || macAgentControlPollInProgress) return;
+  const credentials = loadMacAgentControlCredentials();
+  if (!credentials) return;
+
+  macAgentControlPollInProgress = true;
+  try {
+    const activity = getCurrentActivity();
+    const commands = await callMacAgentControl({
+      action: 'agent-poll',
+      device_name: hostname(),
+      current_app: activity.activeWindow.appName,
+      current_window: activity.activeWindow.windowTitle,
+      usage_status: activity.state,
+      session_status: activeEmployeeSession ? 'signed_in' : 'awaiting_login',
+      agent_version: app.getVersion(),
+    }, credentials.token);
+
+    for (const command of commands.commands || []) {
+      if (command.command !== 'CLOSE_AGENT') continue;
+      const ack = await callMacAgentControl({
+        action: 'agent-ack',
+        command_id: command.id,
+        status: 'executed',
+        detail: 'Agent acknowledged admin close and is exiting.',
+      }, credentials.token);
+      if (ack.acknowledged) {
+        remoteAgentCloseAuthorized = true;
+        app.quit();
+        return;
+      }
+    }
+  } catch (error) {
+    console.warn('[MacAgentControl] Poll failed; will retry:', error);
+  } finally {
+    macAgentControlPollInProgress = false;
+  }
+}
+
+function startMacAgentControlPolling() {
+  if (process.platform !== 'darwin' || macAgentControlPollInterval) return;
+  void pollMacAgentControl();
+  macAgentControlPollInterval = setInterval(() => void pollMacAgentControl(), 10_000);
+}
 const lastEmployeeCodePath = path.join(app.getPath('userData'), 'last-employee-code.txt');
 let dailySkipCheckInterval: NodeJS.Timeout | null = null;
 let isCheckingAgentStart = false;
@@ -732,6 +824,7 @@ app.on('ready', async () => {
 
   // Initialize timesheet enforcer with URL getter
   setTimesheetDbUrlGetter(getTimesheetDbUrl);
+  startMacAgentControlPolling();
   registerWindowsStartup();
   await startAgentIfAllowed();
 });
@@ -770,6 +863,38 @@ ipcMain.handle('get-cached-data', async (_, key: string) => {
     if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
     return null;
   } catch { return null; }
+});
+
+ipcMain.handle('register-mac-agent-control', async (event, employeeCode: string, password: string) => {
+  if (process.platform !== 'darwin' || event.sender !== mainWindow?.webContents) {
+    return { supported: process.platform === 'darwin', registered: false };
+  }
+  if (!employeeCode || !password) return { supported: true, registered: false, error: 'Missing employee credentials.' };
+
+  try {
+    if (!safeStorage.isEncryptionAvailable()) {
+      return { supported: true, registered: false, error: 'macOS secure storage is unavailable.' };
+    }
+    const prior = loadMacAgentControlCredentials();
+    const credentials: MacAgentControlCredentials = prior?.employeeCode.toUpperCase() === employeeCode.trim().toUpperCase()
+      ? prior
+      : { deviceId: randomUUID(), employeeCode: employeeCode.trim().toUpperCase(), token: randomBytes(32).toString('hex') };
+
+    await callMacAgentControl({
+      action: 'register-agent',
+      employee_code: credentials.employeeCode,
+      password,
+      device_id: credentials.deviceId,
+      device_name: hostname(),
+      device_token: credentials.token,
+    });
+    saveMacAgentControlCredentials(credentials);
+    startMacAgentControlPolling();
+    return { supported: true, registered: true };
+  } catch (error) {
+    console.error('[MacAgentControl] Device registration failed:', error);
+    return { supported: true, registered: false, error: 'Remote management registration failed.' };
+  }
 });
 
 ipcMain.handle('enter-kiosk', async () => {
@@ -1572,7 +1697,7 @@ ipcMain.handle('stop-tracking', async () => {
 
 function preventQuitDuringEmployeeSession(event: Electron.Event, source: string) {
   const activeSession = hasActiveEmployeeSession();
-  const shouldBlock = gotLock && (windowLocked || activeSession);
+  const shouldBlock = gotLock && !remoteAgentCloseAuthorized && (windowLocked || activeSession);
   console.info(`[Main] ${source}: locked=${windowLocked}, activeSession=${activeSession}, blockQuit=${shouldBlock}`);
   if (shouldBlock) {
     event.preventDefault();
@@ -1584,6 +1709,8 @@ function preventQuitDuringEmployeeSession(event: Electron.Event, source: string)
 
 app.on('before-quit', (event) => {
   if (preventQuitDuringEmployeeSession(event, 'before-quit')) return;
+  if (macAgentControlPollInterval) clearInterval(macAgentControlPollInterval);
+  macAgentControlPollInterval = null;
   if (lockedWindowFocusInterval) clearInterval(lockedWindowFocusInterval);
   lockedWindowFocusInterval = null;
   isQuitting = true;

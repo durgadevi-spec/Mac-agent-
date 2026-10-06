@@ -116,6 +116,17 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
         return;
       }
 
+      const electronAPI = (window as any).electronAPI;
+      if (employee.employee_code && electronAPI?.registerMacAgentControl) {
+        void electronAPI.registerMacAgentControl(employee.employee_code, password).then((result: any) => {
+          if (result?.supported && !result.registered) {
+            console.warn('[MacAgentControl] This Mac was not registered for remote management.');
+          }
+        }).catch(() => {
+          console.warn('[MacAgentControl] Registration unavailable; employee login will continue.');
+        });
+      }
+
       // Initialize Electron session counters with values from database
       try {
         const api = (window as any).electronAPI;

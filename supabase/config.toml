@@ -1,0 +1,2 @@
+[functions.mac-agent-control]
+verify_jwt = false

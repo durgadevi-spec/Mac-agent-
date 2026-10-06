@@ -74,6 +74,7 @@ const electronAPI = {
   getRecentScreenshots: () => ipcRenderer.invoke('get-recent-screenshots'),
   acknowledgeScreenshots: (ids) => ipcRenderer.invoke('acknowledge-screenshots', ids),
   setCurrentEmployee: (employeeId) => ipcRenderer.invoke('set-current-employee', employeeId),
+  registerMacAgentControl: (employeeCode, password) => ipcRenderer.invoke('register-mac-agent-control', employeeCode, password),
   startScreenshotService: () => ipcRenderer.invoke('start-screenshot-service'),
   stopScreenshotService: () => ipcRenderer.invoke('stop-screenshot-service'),
   updateMonitoringSettings: (settings) => ipcRenderer.invoke('update-monitoring-settings', settings),

@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   Users,
   Monitor,
+  Laptop,
   FileText,
   BarChart3,
   MapPin,
@@ -46,6 +47,7 @@ import {
   Line
 } from 'recharts';
 import MonitoringDashboard from './MonitoringDashboard';
+import MacAgentManagementPanel from './MacAgentManagementPanel';
 import WindowControls from './WindowControls';
 import {
   fetchAllEmployees,
@@ -106,12 +108,13 @@ interface EmployeeQuickView {
 
 interface AdminMonitoringScreenProps {
   onLogout?: () => void;
+  adminEmployeeCode?: string;
 }
 
-const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout }) => {
+const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout, adminEmployeeCode = '' }) => {
   // Navigation State
   const [sidebarActive, setSidebarActive] = useState<
-    'dashboard' | 'employees' | 'monitoring' | 'reports' | 'analytics' | 'field_tracking' | 'access_control' | 'settings' | 'profile'
+    'dashboard' | 'employees' | 'monitoring' | 'reports' | 'analytics' | 'field_tracking' | 'access_control' | 'mac_agent_control' | 'settings' | 'profile'
   >('dashboard');
 
   // Inner Settings Tab State
@@ -1112,6 +1115,16 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
               Access Control
             </button>
             <button
+              onClick={() => setSidebarActive('mac_agent_control')}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition ${sidebarActive === 'mac_agent_control'
+                ? 'bg-blue-50 text-blue-600'
+                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                }`}
+            >
+              <Laptop className="w-4 h-4" />
+              Mac Agent Management
+            </button>
+            <button
               onClick={() => setSidebarActive('settings')}
               className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition ${sidebarActive === 'settings'
                 ? 'bg-blue-50 text-blue-600'
@@ -1875,6 +1888,10 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({ onLogout 
               </div>
               <MonitoringDashboard />
             </div>
+          )}
+
+          {sidebarActive === 'mac_agent_control' && (
+            <MacAgentManagementPanel adminEmployeeCode={adminEmployeeCode} />
           )}
 
           {/* ─── OTHER SIDEBAR PLACEHOLDERS ──────────────────────── */}
