@@ -59,21 +59,38 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          set -e
-          CERTIFICATE_PATH="$RUNNER_TEMP/apple_certificate.p12"
-          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          set -euo pipefail
+          CERTIFICATE_PATH="$RUNNER_TEMP/apple_distribution.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+          if [ -z "${APPLE_CERTIFICATE:-}" ]; then
+            echo "APPLE_CERTIFICATE secret is missing or empty."
+            exit 1
+          fi
 
           echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERTIFICATE_PATH"
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security default-keychain -s "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERTIFICATE_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security import "$CERTIFICATE_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          DMG_PATH=$(ls release/*.dmg | head -n 1)
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | head -n 2 | tail -n 1 | awk '{print $2, $3, $4, $5, $6, $7}' | tr -d '()')
+          if [ -z "$IDENTITY" ]; then
+            echo "No Apple signing identity found in the imported certificate."
+            exit 1
+          fi
+
+          DMG_PATH="$(ls release/*.dmg | head -n 1)"
+          if [ -z "$DMG_PATH" ]; then
+            echo "No DMG file was created in release/."
+            exit 1
+          fi
+
           echo "Signing DMG: $DMG_PATH"
-          codesign --force --deep --sign "Apple Distribution" --options runtime --timestamp "$DMG_PATH"
+          codesign --force --deep --sign "$IDENTITY" --options runtime --timestamp "$DMG_PATH"
 
       - name: Notarize macOS DMG
         env:
