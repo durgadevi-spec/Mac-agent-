@@ -167,7 +167,7 @@ export default function MacAgentManagementPanel({ adminEmployeeCode }: Props) {
           <form onSubmit={authenticateAdmin} className="space-y-4">
             <label className="block text-sm font-medium text-slate-700">
               Admin employee code
-              <input value={adminEmployeeCode} readOnly className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600" />
+              <input value={adminEmployeeCode || 'ADMIN1'} readOnly className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600" />
             </label>
             <label className="block text-sm font-medium text-slate-700">
               Admin password

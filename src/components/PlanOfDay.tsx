@@ -382,11 +382,19 @@ export default function PlanOfDay({
               Open in browser
             </a>
           </div>
-          <div className="relative w-full h-[420px] lg:h-[600px] min-h-[420px] flex items-center justify-center bg-gray-50">
-            <iframe 
-              src={portalUrl} 
-              className="w-full h-full border-0" 
+          <div className="relative flex-1 min-h-[420px] w-full overflow-hidden bg-gray-50">
+            <iframe
+              src={portalUrl}
+              className="w-full h-full min-h-[420px] border-0"
               title="Daily Plan Portal"
+              style={{
+                width: '100%',
+                height: '100%',
+                display: 'block',
+                transform: 'scale(1)',
+                transformOrigin: 'top left',
+                minHeight: '420px',
+              }}
             />
           </div>
         </div>
