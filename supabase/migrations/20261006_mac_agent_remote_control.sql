@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS public.mac_agent_devices (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id uuid NOT NULL REFERENCES public.employees(id) ON DELETE CASCADE,
   device_id text NOT NULL UNIQUE,
-  device_name text NOT NULL,
+  device_name text NOT NULL, 
   platform text NOT NULL DEFAULT 'darwin' CHECK (platform = 'darwin'),
   token_hash text NOT NULL UNIQUE,
   agent_status text NOT NULL DEFAULT 'offline' CHECK (agent_status IN ('active', 'closed', 'failed')),
