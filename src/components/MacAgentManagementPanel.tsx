@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Laptop, Power, RefreshCw } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { getSupabaseFunctionErrorMessage, supabase } from '../lib/supabase';
 
 interface MacAgentRow {
   employee_id: string;
@@ -56,21 +56,13 @@ export default function MacAgentManagementPanel({ adminToken, adminName, authErr
   const refreshInFlight = useRef(false);
 
   const callControl = async (body: Record<string, unknown>, token?: string) => {
-    const { data, error: invokeError } = await supabase.functions.invoke('mac-agent-control', {
-      body,
+      const { data, error: invokeError } = await supabase.functions.invoke('mac-agent-control', {
+        body,
         ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
       });
-    if (invokeError) {
-      const context = (invokeError as any).context;
-      if (context && typeof context.json === 'function') {
-        let responseBody: any = null;
-        try {
-          responseBody = await context.json();
-        } catch { }
-        if (responseBody?.error) throw new Error(responseBody.error);
+      if (invokeError) {
+        throw new Error(await getSupabaseFunctionErrorMessage(invokeError));
       }
-      throw invokeError;
-    }
     if (data?.error) throw new Error(data.error);
     return data;
   };

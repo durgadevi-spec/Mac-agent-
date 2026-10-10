@@ -1,6 +1,6 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { LogIn, User, Hash, Lock, Loader2, Apple } from 'lucide-react';
-import { Employee, WorkSession, loginEmployee, getTodaySession, supabase } from '../lib/supabase';
+import { Employee, WorkSession, loginEmployee, getTodaySession, getSupabaseFunctionErrorMessage, supabase } from '../lib/supabase';
 import WindowControls from './WindowControls';
 
 interface LoginScreenProps {
@@ -134,9 +134,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
           }
           adminControlToken = data.token;
         } catch (controlError: unknown) {
-          adminControlError = controlError instanceof Error
-            ? controlError.message
-            : 'Could not start Mac Agent control.';
+          adminControlError = await getSupabaseFunctionErrorMessage(controlError);
           console.error('[MacAgentControl] Admin session could not be created:', controlError);
         }
       }

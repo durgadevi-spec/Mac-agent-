@@ -60,6 +60,32 @@ export const supabase = new Proxy({} as SupabaseClient, {
   },
 });
 
+export async function getSupabaseFunctionErrorMessage(error: unknown): Promise<string> {
+  const fallback = error instanceof Error ? error.message : 'Supabase Edge Function request failed.';
+  if (!error || typeof error !== 'object' || !('context' in error)) return fallback;
+
+  const context = error.context;
+  if (!(context instanceof Response)) return fallback;
+
+  try {
+    const responseText = await context.clone().text();
+    if (!responseText) return fallback;
+    try {
+      const body: unknown = JSON.parse(responseText);
+      if (body && typeof body === 'object') {
+        const errorMessage = 'error' in body && typeof body.error === 'string' ? body.error : null;
+        const message = 'message' in body && typeof body.message === 'string' ? body.message : null;
+        if (errorMessage || message) return errorMessage || message || fallback;
+      }
+    } catch {
+      return responseText;
+    }
+    return responseText;
+  } catch {
+    return fallback;
+  }
+}
+
 export interface Employee {
   id: string;
   employee_code: string;
@@ -1124,4 +1150,3 @@ export async function fetchRecentTimesheetLockLogs(limit: number = 200): Promise
 
   return data || [];
 }
-
