@@ -195,7 +195,7 @@ let tray: Tray | null = null;
 let isQuitting = false;
 let windowLocked = true;
 let activeEmployeeSession = false;
-let remoteAgentCloseAuthorized = false;
+let remoteAgentWindowHidden = false;
 let macAgentControlPollInterval: NodeJS.Timeout | null = null;
 let macAgentControlPollInProgress = false;
 let dailyStartupSkipReason: string | null = null;
@@ -224,7 +224,7 @@ function hasActiveEmployeeSession() {
 }
 
 function refocusLockedWindow() {
-  if (process.platform !== 'darwin' || !windowLocked || lockedChildWindowOpen || isIdlePromptWindowOpen() || !mainWindow || mainWindow.isDestroyed()) return;
+  if (process.platform !== 'darwin' || !windowLocked || remoteAgentWindowHidden || lockedChildWindowOpen || isIdlePromptWindowOpen() || !mainWindow || mainWindow.isDestroyed()) return;
 
   try {
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -238,6 +238,14 @@ function refocusLockedWindow() {
   } catch (error) {
     console.error('[Main] Failed to refocus locked check-in window:', error);
   }
+}
+
+function showMainWindow() {
+  remoteAgentWindowHidden = false;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
 }
 
 function syncLockedWindowFocusEnforcement() {
@@ -329,16 +337,11 @@ async function pollMacAgentControl() {
         action: 'agent-ack',
         command_id: command.id,
         status: 'executed',
-        detail: 'Agent acknowledged admin close and is exiting.',
+        detail: 'Agent window hidden by admin. The agent remains running.',
       }, credentials.token);
       if (ack.acknowledged) {
-        remoteAgentCloseAuthorized = true;
-        const forceExitTimer = setTimeout(() => {
-          console.error('[MacAgentControl] Graceful quit did not finish after admin close; forcing agent exit.');
-          app.exit(0);
-        }, 1500);
-        forceExitTimer.unref();
-        app.quit();
+        remoteAgentWindowHidden = true;
+        mainWindow?.hide();
         return;
       }
     }
@@ -463,8 +466,7 @@ if (!gotLock) {
 
 app.on('second-instance', () => {
   if (mainWindow) {
-    mainWindow.show();
-    mainWindow.focus();
+    showMainWindow();
   } else {
     void startAgentIfAllowed();
   }
@@ -685,9 +687,7 @@ function createTray() {
   const buildMenu = () => Menu.buildFromTemplate([
     {
       label: 'Show Knockturn',
-      click: () => {
-        if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
-      },
+      click: showMainWindow,
     },
     {
       label: 'Hide to Tray',
@@ -720,11 +720,11 @@ function createTray() {
   refreshTrayMenu();
 
   tray.on('click', () => {
-    if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
+    showMainWindow();
   });
 
   tray.on('double-click', () => {
-    if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
+    showMainWindow();
   });
 }
 
@@ -842,8 +842,7 @@ app.on('activate', () => {
   if (mainWindow === null) {
     void startAgentIfAllowed();
   } else {
-    mainWindow.show();
-    mainWindow.focus();
+    showMainWindow();
   }
 });
 
@@ -1702,7 +1701,7 @@ ipcMain.handle('stop-tracking', async () => {
 
 function preventQuitDuringEmployeeSession(event: Electron.Event, source: string) {
   const activeSession = hasActiveEmployeeSession();
-  const shouldBlock = gotLock && !remoteAgentCloseAuthorized && (windowLocked || activeSession);
+  const shouldBlock = gotLock && (windowLocked || activeSession);
   console.info(`[Main] ${source}: locked=${windowLocked}, activeSession=${activeSession}, blockQuit=${shouldBlock}`);
   if (shouldBlock) {
     event.preventDefault();
