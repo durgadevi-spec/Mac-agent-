@@ -374,7 +374,7 @@ export default function TimerScreen({ employee, session, showWaterReminder, onDi
             <p className="font-semibold text-gray-700 text-sm">{clockStr}</p>
             <p className="text-xs text-gray-400">{dateStr}</p>
           </div>
-          <WindowControls />
+          <WindowControls minimizeOnClose />
           {!isHistoricalView && (
             <>
               <button

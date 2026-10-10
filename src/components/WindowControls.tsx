@@ -3,9 +3,10 @@ import { useState } from 'react';
 
 interface WindowControlsProps {
   disabledClose?: boolean;
+  minimizeOnClose?: boolean;
 }
 
-export default function WindowControls({ disabledClose = false }: WindowControlsProps) {
+export default function WindowControls({ disabledClose = false, minimizeOnClose = false }: WindowControlsProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const [showLockIndicator, setShowLockIndicator] = useState(false);
 
@@ -20,6 +21,10 @@ export default function WindowControls({ disabledClose = false }: WindowControls
     if (disabledClose) {
       setShowLockIndicator(true);
       setTimeout(() => setShowLockIndicator(false), 2000);
+      return;
+    }
+    if (minimizeOnClose) {
+      await api?.minimizeWindow?.();
       return;
     }
     await api?.closeWindow?.();
@@ -46,7 +51,7 @@ export default function WindowControls({ disabledClose = false }: WindowControls
         className={`w-8 h-8 rounded-full ${disabledClose 
           ? 'bg-red-100 text-red-400 cursor-not-allowed' 
           : 'bg-red-50 hover:bg-red-100 text-red-600'} flex items-center justify-center transition`}
-        title={disabledClose ? "Close disabled - complete plan flow to unlock" : "Close"}
+        title={disabledClose ? "Close disabled - complete plan flow to unlock" : minimizeOnClose ? "Minimize" : "Close"}
       >
         <X className="w-4 h-4" />
       </button>

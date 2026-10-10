@@ -1176,7 +1176,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
 
           {/* Right actions */}
           <div className="flex items-center gap-4">
-            <WindowControls />
+            <WindowControls minimizeOnClose />
 
             {/* Dark mode toggle */}
             <button

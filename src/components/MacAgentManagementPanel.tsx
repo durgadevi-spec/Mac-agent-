@@ -98,7 +98,7 @@ export default function MacAgentManagementPanel({ adminToken, adminName, authErr
 
   const closeAgent = async (row: MacAgentRow) => {
     if (!adminToken || !row.device_id) return;
-    const accepted = window.confirm(`Hide the Mac Agent window for ${row.employee_name}? The agent will keep running and can be reopened from the Mac menu bar icon.`);
+    const accepted = window.confirm(`Are you sure you want to close the Mac Agent for ${row.employee_name}?`);
     if (!accepted) return;
 
     setClosingDevice(row.device_id);
@@ -107,9 +107,9 @@ export default function MacAgentManagementPanel({ adminToken, adminName, authErr
     try {
       const result = await callControl({ action: 'admin-close', device_id: row.device_id }, adminToken);
       if (result.delivered) {
-        setNotice(`Hide request sent to ${row.employee_name}. The agent will keep running and can be reopened from the Mac menu bar icon.`);
+        setNotice(`Close command queued for ${row.employee_name}. Waiting for the Mac Agent to confirm closure.`);
       } else {
-        setNotice(`Could not deliver the hide request to ${row.employee_name}: the Mac Agent is offline.`);
+        setNotice(`Could not deliver the close command to ${row.employee_name}: the Mac Agent is offline.`);
       }
       await refreshStatus();
     } catch (closeError: any) {
@@ -135,7 +135,7 @@ export default function MacAgentManagementPanel({ adminToken, adminName, authErr
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-bold text-slate-900">Mac Agent Status</h2>
-          <p className="mt-1 text-sm text-slate-500">Live device status. Hiding a window leaves the agent running; it can be reopened from the Mac menu bar icon. Authenticated as {adminName}.</p>
+          <p className="mt-1 text-sm text-slate-500">Live device heartbeat and remote close controls. Authenticated as {adminName}.</p>
         </div>
         <button onClick={() => void refreshStatus()} disabled={refreshing} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50">
           <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
@@ -190,7 +190,7 @@ export default function MacAgentManagementPanel({ adminToken, adminName, authErr
                       className="inline-flex items-center gap-2 rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {closingDevice === row.device_id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Power className="h-3.5 w-3.5" />}
-                      Hide Window
+                      Close Agent
                     </button>
                   </td>
                 </tr>

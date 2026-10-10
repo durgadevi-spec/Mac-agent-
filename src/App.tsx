@@ -360,21 +360,13 @@ export default function App() {
     setMacAgentAdminError(adminControlError);
 
     if (emp.role === 'admin' || emp.role === 'superadmin') {
-      const eApi = api();
-      if (!eApi) {
+      try {
+        await api()?.setWindowClosable?.(true);
+        await api()?.setWindowMinimizable?.(true);
+        await api()?.exitKiosk?.();
         setWindowLocked(false);
-      } else {
-        try {
-          const closable = await eApi.setWindowClosable?.(true);
-          const minimizable = await eApi.setWindowMinimizable?.(true);
-          const kioskExited = await eApi.exitKiosk?.();
-          if (closable === false || minimizable === false || kioskExited === false) {
-            throw new Error('Electron did not unlock the admin window.');
-          }
-          setWindowLocked(false);
-        } catch (error) {
-          console.error('[App] Could not unlock the admin window:', error);
-        }
+      } catch (error) {
+        console.error('[App] Failed to unlock admin window controls:', error);
       }
       setScreen('admin');
       return;

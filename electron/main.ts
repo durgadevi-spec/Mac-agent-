@@ -195,7 +195,7 @@ let tray: Tray | null = null;
 let isQuitting = false;
 let windowLocked = true;
 let activeEmployeeSession = false;
-let remoteAgentWindowHidden = false;
+let remoteAgentCloseAuthorized = false;
 let macAgentControlPollInterval: NodeJS.Timeout | null = null;
 let macAgentControlPollInProgress = false;
 let dailyStartupSkipReason: string | null = null;
@@ -224,7 +224,7 @@ function hasActiveEmployeeSession() {
 }
 
 function refocusLockedWindow() {
-  if (process.platform !== 'darwin' || !windowLocked || remoteAgentWindowHidden || lockedChildWindowOpen || isIdlePromptWindowOpen() || !mainWindow || mainWindow.isDestroyed()) return;
+  if (process.platform !== 'darwin' || !windowLocked || lockedChildWindowOpen || isIdlePromptWindowOpen() || !mainWindow || mainWindow.isDestroyed()) return;
 
   try {
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -238,14 +238,6 @@ function refocusLockedWindow() {
   } catch (error) {
     console.error('[Main] Failed to refocus locked check-in window:', error);
   }
-}
-
-function showMainWindow() {
-  remoteAgentWindowHidden = false;
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
 }
 
 function syncLockedWindowFocusEnforcement() {
@@ -337,11 +329,16 @@ async function pollMacAgentControl() {
         action: 'agent-ack',
         command_id: command.id,
         status: 'executed',
-        detail: 'Agent window hidden by admin. The agent remains running.',
+        detail: 'Agent acknowledged admin close and is exiting.',
       }, credentials.token);
       if (ack.acknowledged) {
-        remoteAgentWindowHidden = true;
-        mainWindow?.hide();
+        remoteAgentCloseAuthorized = true;
+        const forceExitTimer = setTimeout(() => {
+          console.error('[MacAgentControl] Graceful quit did not finish after admin close; forcing agent exit.');
+          app.exit(0);
+        }, 1500);
+        forceExitTimer.unref();
+        app.quit();
         return;
       }
     }
@@ -466,7 +463,8 @@ if (!gotLock) {
 
 app.on('second-instance', () => {
   if (mainWindow) {
-    showMainWindow();
+    mainWindow.show();
+    mainWindow.focus();
   } else {
     void startAgentIfAllowed();
   }
@@ -595,8 +593,6 @@ async function createWindow() {
       mainWindow?.restore();
       mainWindow?.show();
       mainWindow?.focus();
-    } else if (process.platform !== 'darwin' && !windowLocked) {
-      mainWindow?.hide();
     }
   });
 
@@ -687,7 +683,9 @@ function createTray() {
   const buildMenu = () => Menu.buildFromTemplate([
     {
       label: 'Show Knockturn',
-      click: showMainWindow,
+      click: () => {
+        if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
+      },
     },
     {
       label: 'Hide to Tray',
@@ -720,11 +718,11 @@ function createTray() {
   refreshTrayMenu();
 
   tray.on('click', () => {
-    showMainWindow();
+    if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
   });
 
   tray.on('double-click', () => {
-    showMainWindow();
+    if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
   });
 }
 
@@ -842,7 +840,8 @@ app.on('activate', () => {
   if (mainWindow === null) {
     void startAgentIfAllowed();
   } else {
-    showMainWindow();
+    mainWindow.show();
+    mainWindow.focus();
   }
 });
 
@@ -1089,7 +1088,7 @@ ipcMain.handle('minimize-window', async () => {
   try {
     if (mainWindow) {
       if (windowLocked) return false;
-      mainWindow.hide(); // hide to tray instead of minimise
+      mainWindow.minimize();
     }
     return true;
   } catch { return false; }
@@ -1701,7 +1700,7 @@ ipcMain.handle('stop-tracking', async () => {
 
 function preventQuitDuringEmployeeSession(event: Electron.Event, source: string) {
   const activeSession = hasActiveEmployeeSession();
-  const shouldBlock = gotLock && (windowLocked || activeSession);
+  const shouldBlock = gotLock && !remoteAgentCloseAuthorized && (windowLocked || activeSession);
   console.info(`[Main] ${source}: locked=${windowLocked}, activeSession=${activeSession}, blockQuit=${shouldBlock}`);
   if (shouldBlock) {
     event.preventDefault();
