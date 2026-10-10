@@ -18,6 +18,8 @@ export default function App() {
   const [screen, setScreen] = useState<AppScreen>('login');
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [session, setSession] = useState<WorkSession | null>(null);
+  const [macAgentAdminToken, setMacAgentAdminToken] = useState<string | null>(null);
+  const [macAgentAdminError, setMacAgentAdminError] = useState('');
   const [planFlowCompleted, setPlanFlowCompleted] = useState(false);
   const [showWaterReminder, setShowWaterReminder] = useState(false);
   const [windowLocked, setWindowLocked] = useState(true); // Start locked at login
@@ -346,9 +348,16 @@ export default function App() {
   }, []);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
-  const handleLogin = async (emp: Employee, sessionData: WorkSession) => {
+  const handleLogin = async (
+    emp: Employee,
+    sessionData: WorkSession,
+    adminControlToken: string | null = null,
+    adminControlError = ''
+  ) => {
     setEmployee(emp);
     setSession(sessionData);
+    setMacAgentAdminToken(adminControlToken);
+    setMacAgentAdminError(adminControlError);
 
     if (emp.role === 'admin' || emp.role === 'superadmin') {
       setScreen('admin');
@@ -430,6 +439,8 @@ export default function App() {
   const handleLogout = async () => {
     setEmployee(null);
     setSession(null);
+    setMacAgentAdminToken(null);
+    setMacAgentAdminError('');
     setPlanFlowCompleted(false);
     setScreen('login');
     setShowWaterReminder(false);
@@ -454,7 +465,15 @@ export default function App() {
   }
 
   if (screen === 'admin') {
-    return <AdminMonitoringScreen onLogout={handleLogout} adminEmployeeCode={employee?.employee_code || ''} />;
+    return (
+      <AdminMonitoringScreen
+        onLogout={handleLogout}
+        adminEmployeeCode={employee?.employee_code || ''}
+        adminEmployeeName={employee?.employee_name || ''}
+        macAgentAdminToken={macAgentAdminToken}
+        macAgentAdminError={macAgentAdminError}
+      />
+    );
   }
 
   if (screen === 'plan' && employee) {

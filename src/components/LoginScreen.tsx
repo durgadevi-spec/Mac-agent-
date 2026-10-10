@@ -1,10 +1,10 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { LogIn, User, Hash, Lock, Loader2, Apple } from 'lucide-react';
-import { Employee, WorkSession, loginEmployee, getTodaySession } from '../lib/supabase';
+import { Employee, WorkSession, loginEmployee, getTodaySession, supabase } from '../lib/supabase';
 import WindowControls from './WindowControls';
 
 interface LoginScreenProps {
-  onLogin: (employee: Employee, session: WorkSession) => void;
+  onLogin: (employee: Employee, session: WorkSession, adminControlToken?: string | null, adminControlError?: string) => void;
 }
 
 export default function LoginScreen({ onLogin }: LoginScreenProps) {
@@ -116,6 +116,31 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
         return;
       }
 
+      let adminControlToken: string | null = null;
+      let adminControlError: string | undefined;
+      if (employee.role === 'admin' || employee.role === 'superadmin') {
+        try {
+          const { data, error: controlError } = await supabase.functions.invoke('mac-agent-control', {
+            body: {
+              action: 'admin-auth',
+              employee_code: employee.employee_code,
+              password,
+            },
+          });
+          if (controlError) throw controlError;
+          if (data?.error) throw new Error(data.error);
+          if (typeof data?.token !== 'string' || !data.token) {
+            throw new Error('Mac Agent control did not return an admin session.');
+          }
+          adminControlToken = data.token;
+        } catch (controlError: unknown) {
+          adminControlError = controlError instanceof Error
+            ? controlError.message
+            : 'Could not start Mac Agent control.';
+          console.error('[MacAgentControl] Admin session could not be created:', controlError);
+        }
+      }
+
       const electronAPI = (window as any).electronAPI;
       if (employee.employee_code && electronAPI?.registerMacAgentControl) {
         void electronAPI.registerMacAgentControl(employee.employee_code, password).then((result: any) => {
@@ -186,7 +211,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
         }
       }
       
-      onLogin(employee, session);
+      onLogin(employee, session, adminControlToken, adminControlError);
     } catch (err) {
       console.error('[Login] Exception:', err);
       setError('Login error. Please try again.');

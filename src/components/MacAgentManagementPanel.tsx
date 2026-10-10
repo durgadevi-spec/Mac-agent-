@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Laptop, LockKeyhole, Power, RefreshCw } from 'lucide-react';
+import { Laptop, Power, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface MacAgentRow {
@@ -26,7 +26,9 @@ interface MacAgentRow {
 }
 
 interface Props {
-  adminEmployeeCode: string;
+  adminToken: string | null;
+  adminName: string;
+  authError: string;
 }
 
 function relativeTime(value: string | null) {
@@ -45,75 +47,32 @@ const statusStyle: Record<MacAgentRow['status'], string> = {
   failed: 'bg-rose-50 text-rose-700 ring-rose-200',
 };
 
-export default function MacAgentManagementPanel({ adminEmployeeCode }: Props) {
-  const [adminPassword, setAdminPassword] = useState('');
-  const [adminToken, setAdminToken] = useState<string | null>(null);
-  const [adminName, setAdminName] = useState('');
+export default function MacAgentManagementPanel({ adminToken, adminName, authError }: Props) {
   const [rows, setRows] = useState<MacAgentRow[]>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [authenticating, setAuthenticating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [closingDevice, setClosingDevice] = useState<string | null>(null);
   const refreshInFlight = useRef(false);
 
   const callControl = async (body: Record<string, unknown>, token?: string) => {
-    try {
-      const { data, error: invokeError } = await supabase.functions.invoke('mac-agent-control', {
-        body,
+    const { data, error: invokeError } = await supabase.functions.invoke('mac-agent-control', {
+      body,
         ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
       });
-      if (invokeError) {
-        const context = (invokeError as any).context;
-        if (context && typeof context.json === 'function') {
-          let responseBody: any = null;
-          try {
-            responseBody = await context.json();
-          } catch { }
-          if (responseBody?.error) throw new Error(responseBody.error);
-        }
-        const message = String(invokeError?.message || invokeError || '');
-        if (/non-2xx|not found|functions.*mac-agent-control|Edge Function/i.test(message)) {
-          const action = String((body as any).action || '');
-          if (action === 'admin-auth') {
-            const employeeCode = String((body as any).employee_code || '').toUpperCase();
-            const password = String((body as any).password || '');
-            if (employeeCode === 'ADMIN1' && password === 'admin123') {
-              return { token: 'local-admin-token', admin_name: 'Administrator', admin_code: employeeCode };
-            }
-            throw new Error('Admin credentials were not accepted. Deploy the Supabase Edge Function to enable remote control.');
-          }
-          if (action === 'admin-status') {
-            return { employees: [] };
-          }
-          if (action === 'admin-close') {
-            return { delivered: false, command: { id: 'local-fallback', status: 'undelivered', requested_at: new Date().toISOString() } };
-          }
-        }
-        throw invokeError;
+    if (invokeError) {
+      const context = (invokeError as any).context;
+      if (context && typeof context.json === 'function') {
+        let responseBody: any = null;
+        try {
+          responseBody = await context.json();
+        } catch { }
+        if (responseBody?.error) throw new Error(responseBody.error);
       }
-      if (data?.error) throw new Error(data.error);
-      return data;
-    } catch (error: any) {
-      const message = String(error?.message || error || '');
-      if (/non-2xx|not found|Edge Function.*status code|functions.*mac-agent-control/i.test(message)) {
-        const action = String((body as any).action || '');
-        if (action === 'admin-auth') {
-          const employeeCode = String((body as any).employee_code || '').toUpperCase();
-          const password = String((body as any).password || '');
-          if (employeeCode === 'ADMIN1' && password === 'admin123') {
-            return { token: 'local-admin-token', admin_name: 'Administrator', admin_code: employeeCode };
-          }
-        }
-        if (action === 'admin-status') {
-          return { employees: [] };
-        }
-        if (action === 'admin-close') {
-          return { delivered: false, command: { id: 'local-fallback', status: 'undelivered', requested_at: new Date().toISOString() } };
-        }
-      }
-      throw error;
+      throw invokeError;
     }
+    if (data?.error) throw new Error(data.error);
+    return data;
   };
 
   const refreshStatus = async () => {
@@ -127,10 +86,8 @@ export default function MacAgentManagementPanel({ adminEmployeeCode }: Props) {
     } catch (requestError: any) {
       const message = String(requestError?.message || requestError);
       if (/authorization expired|unauthorized|401/i.test(message)) {
-        setAdminToken(null);
-        setAdminName('');
         setRows([]);
-        setError('Admin session expired. Re-enter your password to continue.');
+        setError('Admin session expired. Sign out and sign in again to continue.');
       } else {
         setError(message || 'Could not refresh Mac Agent status.');
       }
@@ -146,28 +103,6 @@ export default function MacAgentManagementPanel({ adminEmployeeCode }: Props) {
     const timer = setInterval(() => void refreshStatus(), 5000);
     return () => clearInterval(timer);
   }, [adminToken]);
-
-  const authenticateAdmin = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!adminEmployeeCode || !adminPassword) return;
-    setAuthenticating(true);
-    setError('');
-    try {
-      const result = await callControl({
-        action: 'admin-auth',
-        employee_code: adminEmployeeCode,
-        password: adminPassword,
-      });
-      setAdminToken(result.token);
-      setAdminName(result.admin_name || adminEmployeeCode);
-      setAdminPassword('');
-    } catch (authError: any) {
-      setError(String(authError?.message || 'Admin authentication failed.'));
-      setAdminPassword('');
-    } finally {
-      setAuthenticating(false);
-    }
-  };
 
   const closeAgent = async (row: MacAgentRow) => {
     if (!adminToken || !row.device_id) return;
@@ -194,31 +129,11 @@ export default function MacAgentManagementPanel({ adminEmployeeCode }: Props) {
 
   if (!adminToken) {
     return (
-      <section className="mx-auto max-w-xl py-12">
-        <div className="rounded-xl border border-slate-200 bg-white p-7 shadow-sm">
-          <div className="mb-5 flex items-center gap-3">
-            <div className="rounded-lg bg-blue-50 p-2 text-blue-700"><LockKeyhole className="h-5 w-5" /></div>
-            <div>
-              <h1 className="text-xl font-bold text-slate-900">Mac Agent Management</h1>
-              <p className="text-sm text-slate-500">Re-enter your admin password to view devices or send commands.</p>
-            </div>
-          </div>
-          <form onSubmit={authenticateAdmin} className="space-y-4">
-            <label className="block text-sm font-medium text-slate-700">
-              Admin employee code
-              <input value={adminEmployeeCode || 'ADMIN1'} readOnly className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600" />
-            </label>
-            <label className="block text-sm font-medium text-slate-700">
-              Admin password
-              <input type="password" autoComplete="current-password" value={adminPassword} onChange={event => setAdminPassword(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" />
-            </label>
-            {error && <p role="alert" className="text-sm text-rose-700">{error}</p>}
-            <button disabled={authenticating || !adminPassword} className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
-              {authenticating ? <RefreshCw className="h-4 w-4 animate-spin" /> : <LockKeyhole className="h-4 w-4" />}
-              {authenticating ? 'Verifying…' : 'Authenticate'}
-            </button>
-          </form>
-        </div>
+      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 className="text-base font-bold text-slate-900">Mac Agent Status</h2>
+        <p role="alert" className="mt-2 text-sm text-rose-700">
+          {authError || 'Mac Agent control could not be initialized from your admin login. Sign out and sign in again, or contact your administrator.'}
+        </p>
       </section>
     );
   }
@@ -227,7 +142,7 @@ export default function MacAgentManagementPanel({ adminEmployeeCode }: Props) {
     <section className="space-y-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Mac Agent Management</h1>
+          <h2 className="text-base font-bold text-slate-900">Mac Agent Status</h2>
           <p className="mt-1 text-sm text-slate-500">Live device heartbeat and remote close controls. Authenticated as {adminName}.</p>
         </div>
         <button onClick={() => void refreshStatus()} disabled={refreshing} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50">
