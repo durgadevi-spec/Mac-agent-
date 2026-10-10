@@ -161,6 +161,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [themeMode, setThemeMode] = useState<'light' | 'dark'>('light');
   const [accessControlSearch, setAccessControlSearch] = useState('');
+  const [accessControlTab, setAccessControlTab] = useState<'mac-agent' | 'timesheet'>('mac-agent');
   const [_allRecentSessions, setAllRecentSessions] = useState<WorkSession[]>([]);
 
   // Employee Add / App Config State
@@ -3024,6 +3025,43 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
                 </div>
               </div>
 
+              <div role="tablist" aria-label="Access Control sections" className="flex gap-2 border-b border-slate-200">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={accessControlTab === 'mac-agent'}
+                  onClick={() => setAccessControlTab('mac-agent')}
+                  className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${accessControlTab === 'mac-agent'
+                    ? 'border-blue-600 text-blue-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                    }`}
+                >
+                  Mac Agent
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={accessControlTab === 'timesheet'}
+                  onClick={() => setAccessControlTab('timesheet')}
+                  className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${accessControlTab === 'timesheet'
+                    ? 'border-blue-600 text-blue-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                    }`}
+                >
+                  Timesheet &amp; Locks
+                </button>
+              </div>
+
+              {accessControlTab === 'mac-agent' && (
+                <MacAgentManagementPanel
+                  adminToken={macAgentAdminToken}
+                  adminName={adminEmployeeName || adminEmployeeCode}
+                  authError={macAgentAdminError}
+                />
+              )}
+
+              {accessControlTab === 'timesheet' && (
+                <div className="space-y-6">
               {/* Stats Grid */}
               {(() => {
                 const total = employeesList.length;
@@ -3076,12 +3114,6 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
                   </div>
                 );
               })()}
-
-              <MacAgentManagementPanel
-                adminToken={macAgentAdminToken}
-                adminName={adminEmployeeName || adminEmployeeCode}
-                authError={macAgentAdminError}
-              />
 
               {/* Timesheet Configuration Box */}
               <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
@@ -3305,6 +3337,8 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
                   </table>
                 </div>
               </div>
+                </div>
+              )}
             </div>
           )}
 

@@ -333,6 +333,11 @@ async function pollMacAgentControl() {
       }, credentials.token);
       if (ack.acknowledged) {
         remoteAgentCloseAuthorized = true;
+        const forceExitTimer = setTimeout(() => {
+          console.error('[MacAgentControl] Graceful quit did not finish after admin close; forcing agent exit.');
+          app.exit(0);
+        }, 1500);
+        forceExitTimer.unref();
         app.quit();
         return;
       }
