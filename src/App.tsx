@@ -489,6 +489,7 @@ export default function App() {
       <PlanOfDay
         employee={employee}
         onComplete={handlePlanComplete}
+        onBackToLogin={handleLogout}
         windowLocked={windowLocked}
         onPlanSubmitted={() => setPlanSubmitted(true)}
         onSummarySubmitted={() => setSummarySubmitted(true)}

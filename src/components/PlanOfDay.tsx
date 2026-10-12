@@ -8,6 +8,7 @@ type PlanPhase = 'form' | 'summary' | 'punch' | 'punch_no';
 interface PlanOfDayProps {
   employee: Employee;
   onComplete: (session: WorkSession) => void;
+  onBackToLogin: () => void;
   windowLocked?: boolean;
   planSubmitted?: boolean;
   summarySubmitted?: boolean;
@@ -20,6 +21,7 @@ interface PlanOfDayProps {
 export default function PlanOfDay({
   employee,
   onComplete,
+  onBackToLogin,
   windowLocked = true,
   onSummarySubmitted,
   onPunchConfirmed,
@@ -38,10 +40,9 @@ export default function PlanOfDay({
   }, [portalOpened]);
 
 
-  const handleBackClick = () => {
-    setSummaryError('');
-    setPunchError('');
-    setPhase('summary');
+  const handleReturnToLogin = () => {
+    if (!window.confirm('Return to login? Your current daily session will remain saved.')) return;
+    onBackToLogin();
   };
 
   const handleConfirmationYes = async () => {
@@ -348,10 +349,12 @@ export default function PlanOfDay({
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={handleBackClick}
-            className="rounded-full bg-pink-50 hover:bg-pink-100 p-2 transition"
+            onClick={handleReturnToLogin}
+            title="Back to login"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-pink-200 px-3 py-2 text-sm font-semibold text-pink-600 transition hover:bg-pink-50"
           >
-            <ArrowLeft className="w-4 h-4 text-pink-500" />
+            <ArrowLeft className="h-4 w-4" />
+            Back to Login
           </button>
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-gradient-to-br from-pink-400 to-rose-500 rounded-lg flex items-center justify-center">
