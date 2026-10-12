@@ -344,8 +344,8 @@ export default function PlanOfDay({
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-rose-50 via-pink-50 to-white flex flex-col">
-      <header className="bg-white border-b border-pink-100 px-6 py-4 flex items-center justify-between gap-3 shadow-sm">
+    <div className="h-screen overflow-hidden bg-gradient-to-br from-rose-50 via-pink-50 to-white flex flex-col">
+      <header className="shrink-0 bg-white border-b border-pink-100 px-6 py-4 flex items-center justify-between gap-3 shadow-sm">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -369,9 +369,9 @@ export default function PlanOfDay({
         <WindowControls disabledClose={windowLocked} />
       </header>
 
-      <div className="flex flex-1 flex-col items-center justify-center gap-5 overflow-y-auto p-6">
-        <div className="flex h-[60vh] min-h-[320px] max-h-[560px] w-full max-w-6xl shrink-0 flex-col overflow-hidden rounded-2xl border border-pink-100 bg-white shadow-md">
-          <div className="bg-gradient-to-r from-pink-50 to-rose-50 border-b border-pink-100 px-4 py-3 flex items-center gap-2">
+      <div className="flex flex-1 min-h-0 flex-col gap-4 p-4 lg:p-6">
+        <div className="flex min-h-0 flex-1 w-full flex-col overflow-hidden rounded-2xl border border-pink-100 bg-white shadow-md">
+          <div className="shrink-0 bg-gradient-to-r from-pink-50 to-rose-50 border-b border-pink-100 px-4 py-3 flex items-center gap-2">
             <ExternalLink className="w-4 h-4 text-pink-400" />
             <span className="text-sm font-medium text-gray-600">
               {portalUrl === 'https://timestrap.space/plan-for-day' ? 'Daily Plan Portal' : 'PMS Tasks'}
@@ -388,46 +388,44 @@ export default function PlanOfDay({
           <div className="relative min-h-0 flex-1 w-full overflow-hidden bg-gray-50">
             <iframe
               src={portalUrl}
-              className="block h-full w-full border-0"
               title="Daily Plan Portal"
-              style={{
-                width: '100%',
-                height: '100%',
-                display: 'block',
-                border: 0,
-              }}
+              className="absolute inset-0 h-full w-full border-0"
             />
           </div>
         </div>
 
-        <div className="w-full max-w-6xl rounded-2xl border border-pink-100 bg-white p-6 shadow-md">
-          <h2 className="text-lg font-semibold text-gray-700 mb-1">Continue to the next step</h2>
-          <p className="text-sm text-gray-400 mb-4">Use the portal to submit your daily plan, then continue when ready.</p>
-          <div className="flex flex-col gap-3">
-            <button
-              type="button"
-              onClick={() => setPhase('summary')}
-              className="w-full bg-gradient-to-r from-pink-500 to-rose-500 text-white font-semibold py-3 rounded-xl shadow hover:from-pink-600 hover:to-rose-600 transition"
-            >
-              Continue
-            </button>
-            {portalUrl === 'https://timestrap.space/plan-for-day' ? (
+        <div className="shrink-0 w-full rounded-2xl border border-pink-100 bg-white px-5 py-4 shadow-md">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-gray-700">Continue to the next step</h2>
+              <p className="text-sm text-gray-400">Use the portal to submit your daily plan, then continue when ready.</p>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row md:w-[480px]">
               <button
                 type="button"
-                onClick={() => setPortalUrl('http://147.93.28.144:5002/tasks')}
-                className="w-full border border-pink-200 text-pink-600 font-semibold py-3 rounded-xl hover:bg-pink-50 transition"
+                onClick={() => setPhase('summary')}
+                className="flex-1 bg-gradient-to-r from-pink-500 to-rose-500 text-white font-semibold py-3 rounded-xl shadow hover:from-pink-600 hover:to-rose-600 transition"
               >
-                PMS - Upload New Task
+                Continue
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setPortalUrl('https://timestrap.space/plan-for-day')}
-                className="w-full border border-pink-200 text-pink-600 font-semibold py-3 rounded-xl hover:bg-pink-50 transition"
-              >
-                Back to TimeStrap
-              </button>
-            )}
+              {portalUrl === 'https://timestrap.space/plan-for-day' ? (
+                <button
+                  type="button"
+                  onClick={() => setPortalUrl('http://147.93.28.144:5002/tasks')}
+                  className="flex-1 border border-pink-200 text-pink-600 font-semibold py-3 rounded-xl hover:bg-pink-50 transition"
+                >
+                  PMS - Upload New Task
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setPortalUrl('https://timestrap.space/plan-for-day')}
+                  className="flex-1 border border-pink-200 text-pink-600 font-semibold py-3 rounded-xl hover:bg-pink-50 transition"
+                >
+                  Back to TimeStrap
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
