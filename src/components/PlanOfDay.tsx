@@ -370,7 +370,7 @@ export default function PlanOfDay({
       </header>
 
       <div className="flex-1 flex flex-col gap-6 p-6">
-        <div className="flex-1 bg-white rounded-2xl shadow-md border border-pink-100 overflow-hidden">
+        <div className="flex flex-1 flex-col min-h-[420px] bg-white rounded-2xl shadow-md border border-pink-100 overflow-hidden">
           <div className="bg-gradient-to-r from-pink-50 to-rose-50 border-b border-pink-100 px-4 py-3 flex items-center gap-2">
             <ExternalLink className="w-4 h-4 text-pink-400" />
             <span className="text-sm font-medium text-gray-600">
@@ -385,7 +385,7 @@ export default function PlanOfDay({
               Open in browser
             </a>
           </div>
-          <div className="relative flex-1 min-h-[420px] w-full overflow-hidden bg-gray-50">
+          <div className="relative flex flex-1 min-h-[420px] w-full overflow-hidden bg-gray-50">
             <iframe
               src={portalUrl}
               className="block w-full h-full min-h-[420px] border-0"
