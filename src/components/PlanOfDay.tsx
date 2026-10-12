@@ -369,8 +369,8 @@ export default function PlanOfDay({
         <WindowControls disabledClose={windowLocked} />
       </header>
 
-      <div className="flex-1 flex flex-col gap-6 p-6">
-        <div className="flex flex-1 flex-col min-h-[420px] bg-white rounded-2xl shadow-md border border-pink-100 overflow-hidden">
+      <div className="flex flex-1 flex-col items-center justify-center gap-5 overflow-y-auto p-6">
+        <div className="flex h-[60vh] min-h-[320px] max-h-[560px] w-full max-w-6xl shrink-0 flex-col overflow-hidden rounded-2xl border border-pink-100 bg-white shadow-md">
           <div className="bg-gradient-to-r from-pink-50 to-rose-50 border-b border-pink-100 px-4 py-3 flex items-center gap-2">
             <ExternalLink className="w-4 h-4 text-pink-400" />
             <span className="text-sm font-medium text-gray-600">
@@ -385,15 +385,14 @@ export default function PlanOfDay({
               Open in browser
             </a>
           </div>
-          <div className="relative flex flex-1 min-h-[420px] w-full overflow-hidden bg-gray-50">
+          <div className="relative min-h-0 flex-1 w-full overflow-hidden bg-gray-50">
             <iframe
               src={portalUrl}
-              className="block w-full h-full min-h-[420px] border-0"
+              className="block h-full w-full border-0"
               title="Daily Plan Portal"
               style={{
                 width: '100%',
                 height: '100%',
-                minHeight: '420px',
                 display: 'block',
                 border: 0,
               }}
@@ -401,7 +400,7 @@ export default function PlanOfDay({
           </div>
         </div>
 
-        <div className="w-full bg-white rounded-2xl shadow-md border border-pink-100 p-6">
+        <div className="w-full max-w-6xl rounded-2xl border border-pink-100 bg-white p-6 shadow-md">
           <h2 className="text-lg font-semibold text-gray-700 mb-1">Continue to the next step</h2>
           <p className="text-sm text-gray-400 mb-4">Use the portal to submit your daily plan, then continue when ready.</p>
           <div className="flex flex-col gap-3">
