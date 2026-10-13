@@ -503,7 +503,10 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
         }));
       } catch (error) {
         console.error('[MonitoringDashboard] Error loading screenshots:', error);
-        if (!cancelled) setScreenshotError('Unable to load screenshots at this time.');
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          setScreenshotError(`Unable to load screenshots: ${message}`);
+        }
       } finally {
         if (!cancelled && showLoading) setScreenshotsLoading(false);
       }

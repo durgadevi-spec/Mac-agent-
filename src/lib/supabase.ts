@@ -859,7 +859,8 @@ export async function getEmployeeScreenshotsByDate(employeeId: string, dateStrin
     .eq('employee_id', employeeId)
     .gte('captured_at', startOfDay)
     .lte('captured_at', endOfDay)
-    .order('captured_at', { ascending: false }) as {
+    .order('captured_at', { ascending: false })
+    .limit(20) as {
       data: Screenshot[] | null;
       error: PostgrestError | null;
     };
@@ -890,7 +891,8 @@ export async function getEmployeeScreenshotsByDate(employeeId: string, dateStrin
           .eq('employee_id', legacyId)
           .gte('captured_at', startOfDay)
           .lte('captured_at', endOfDay)
-          .order('captured_at', { ascending: false }) as { data: Screenshot[] | null; error: PostgrestError | null };
+          .order('captured_at', { ascending: false })
+          .limit(20) as { data: Screenshot[] | null; error: PostgrestError | null };
         if (legacyError) throw legacyError;
         if (legacyData && legacyData.length > 0) {
           console.log(`[Screenshots] Found ${legacyData.length} screenshots under legacy id ${legacyId} for date ${dateString}`);
