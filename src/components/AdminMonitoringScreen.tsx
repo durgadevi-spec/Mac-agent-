@@ -100,7 +100,8 @@ interface EmployeeQuickView {
   agentInstalled?: boolean;
   lastSessionDate?: string;
   employee_code?: string;
-  timesheetStatus?: boolean;
+  timesheetStatus?: boolean | null;
+  manuallyLocked?: boolean;
   shift_start?: string;
   shift_end?: string;
 }
@@ -526,11 +527,22 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
       sessions.forEach((session) => sessionMap.set(session.employee_id, session));
 
       const latestLockReasonByEmployee = new Map<string, string>();
+      const manuallyLockedByEmployee = new Map<string, boolean>();
       lockLogs.forEach((log) => {
         if (!latestLockReasonByEmployee.has(log.employee_id)) {
           if (log.reason && log.reason.trim()) {
             latestLockReasonByEmployee.set(log.employee_id, log.reason.trim());
           }
+        }
+        if (
+          !manuallyLockedByEmployee.has(log.employee_id) &&
+          (log.event_type === 'MANUAL_LOCK' || log.event_type === 'MANUAL_UNLOCK')
+        ) {
+          const unlockIsCurrent = Date.now() - new Date(log.created_at).getTime() < 18 * 60 * 60 * 1000;
+          manuallyLockedByEmployee.set(
+            log.employee_id,
+            log.event_type === 'MANUAL_LOCK' || !unlockIsCurrent
+          );
         }
       });
 
@@ -569,10 +581,11 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
           idleSeconds,
           productiveSeconds,
           lastLockReason: latestLockReasonByEmployee.get(employee.id) ?? null,
+          manuallyLocked: manuallyLockedByEmployee.get(employee.id) ?? false,
           agentInstalled,
           lastSessionDate,
           employee_code: employee.employee_code,
-          timesheetStatus: true, // Will update below
+          timesheetStatus: null,
           shift_start: employee.shift_start,
           shift_end: employee.shift_end,
         };
@@ -589,14 +602,14 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
           if (empCodes.length > 0) {
             const { results } = await eApi.checkTimesheetsSubmittedBatch(empCodes, accessControlDate);
             updatedEmployeeList.forEach(e => {
-              if (e.employee_code && typeof results[e.employee_code] !== 'undefined') {
-                e.timesheetStatus = results[e.employee_code];
-              }
+              const result = e.employee_code ? results[e.employee_code] : undefined;
+              e.timesheetStatus = typeof result === 'boolean' ? result : null;
             });
           }
         }
       } catch (err) {
         console.error('Failed to fetch batch timesheet status', err);
+        updatedEmployeeList.forEach(e => { e.timesheetStatus = null; });
       }
 
       const statusCounts = { online: 0, idle: 0, away: 0, offline: 0 };
@@ -664,10 +677,8 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
           if (empCodes.length > 0) {
             const { results } = await eApi.checkTimesheetsSubmittedBatch(empCodes, accessControlDate);
             setEmployeesList(prev => prev.map(e => {
-              if (e.employee_code && typeof results[e.employee_code] !== 'undefined') {
-                return { ...e, timesheetStatus: results[e.employee_code] };
-              }
-              return e;
+              const result = e.employee_code ? results[e.employee_code] : undefined;
+              return { ...e, timesheetStatus: typeof result === 'boolean' ? result : null };
             }));
           }
         }
@@ -678,6 +689,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
 
     // Only refetch if we already have employees loaded (initial load is handled by loadAdminStats)
     if (employeesList.length > 0) {
+      setEmployeesList(prev => prev.map(e => ({ ...e, timesheetStatus: null })));
       fetchTimesheetStatuses();
     }
   }, [accessControlDate]);
@@ -820,7 +832,10 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
     setReleasingUserId(emp.id); // Reuse state for loading
     try {
       // Log event in DB
-      await logTimesheetLockEvent(emp.id, emp.name, 'MANUAL_LOCK', undefined, 'Administrator', reason);
+      const logged = await logTimesheetLockEvent(emp.id, emp.name, 'MANUAL_LOCK', undefined, 'Administrator', reason);
+      if (!logged) throw new Error('Manual lock event could not be saved');
+
+      setEmployeesList(prev => prev.map(e => e.id === emp.id ? { ...e, manuallyLocked: true } : e));
 
       if (emp.status !== 'online') {
         setToastMessage(`Employee is offline. Lock command will be applied when the Agent reconnects.`);
@@ -830,8 +845,6 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
       setShowToast(true);
       setTimeout(() => setShowToast(false), 3000);
 
-      // Mark them as not submitted (locked) locally for UI
-      setEmployeesList(prev => prev.map(e => e.id === emp.id ? { ...e, timesheetStatus: false } : e));
     } catch (e) {
       console.error(e);
       alert("Failed to lock user.");
@@ -847,14 +860,15 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
     setReleasingUserId(emp.id);
     try {
       // Log event in DB
-      await logTimesheetLockEvent(emp.id, emp.name, 'MANUAL_UNLOCK', undefined, 'Administrator', reason);
+      const logged = await logTimesheetLockEvent(emp.id, emp.name, 'MANUAL_UNLOCK', undefined, 'Administrator', reason);
+      if (!logged) throw new Error('Manual unlock event could not be saved');
+
+      setEmployeesList(prev => prev.map(e => e.id === emp.id ? { ...e, manuallyLocked: false } : e));
 
       setToastMessage(`Unlocked ${emp.name} successfully!`);
       setShowToast(true);
       setTimeout(() => setShowToast(false), 3000);
 
-      // We just mark them as submitted locally for UI
-      setEmployeesList(prev => prev.map(e => e.id === emp.id ? { ...e, timesheetStatus: true } : e));
     } catch (e) {
       console.error(e);
       alert("Failed to release user.");
@@ -3267,15 +3281,20 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
                               )}
                             </td>
                             <td className="px-6 py-4">
-                              {emp.timesheetStatus ? (
+                              {emp.timesheetStatus === true ? (
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/50">
                                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                                   Submitted
                                 </span>
-                              ) : (
+                              ) : emp.timesheetStatus === false ? (
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200/50">
                                   <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
                                   Pending
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200/50">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                                  Not verified
                                 </span>
                               )}
                             </td>
@@ -3308,7 +3327,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
                                   {isFetchingCompliance === emp.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Eye className="w-3 h-3" />}
                                   View Compliance
                                 </button>
-                                {emp.timesheetStatus === false && (
+                                {emp.manuallyLocked && (
                                   <button
                                     onClick={() => handleReleaseUser(emp)}
                                     disabled={releasingUserId === emp.id}
@@ -3318,7 +3337,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
                                     Release Lock
                                   </button>
                                 )}
-                                {emp.timesheetStatus === true && (
+                                {!emp.manuallyLocked && (
                                   <button
                                     onClick={() => handleLockUser(emp)}
                                     disabled={releasingUserId === emp.id}
