@@ -165,7 +165,7 @@ export async function loginEmployee(
   const normalizedName = employeeName.trim();
 
   try {
-    console.log(`[Supabase Debug] Querying employees table for: employee_code="${normalizedCode}", password_hash="${password}"`);
+    console.log('[Supabase Debug] Querying employees table');
     // Try primary database first
     const { data, error } = await supabase
       .from('employees')
