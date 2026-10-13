@@ -866,7 +866,7 @@ export async function getEmployeeScreenshotsByDate(employeeId: string, dateStrin
 
   if (error) {
     console.error('Error fetching screenshots by date:', error);
-    return [];
+    throw error;
   }
 
   const primary = data || [];
@@ -875,28 +875,31 @@ export async function getEmployeeScreenshotsByDate(employeeId: string, dateStrin
   // synthetic "emp-XXXX" ID (created before the employee-ID mapping fix).
   if (primary.length === 0) {
     try {
-      const { data: empRow } = await supabase
+      const { data: empRow, error: employeeError } = await supabase
         .from('employees')
         .select('employee_code')
         .eq('id', employeeId)
         .maybeSingle() as { data: { employee_code: string } | null; error: PostgrestError | null };
+      if (employeeError) throw employeeError;
 
       if (empRow?.employee_code) {
         const legacyId = `emp-${empRow.employee_code.toUpperCase()}`;
-        const { data: legacyData } = await supabase
+        const { data: legacyData, error: legacyError } = await supabase
           .from('screenshots')
           .select('*')
           .eq('employee_id', legacyId)
           .gte('captured_at', startOfDay)
           .lte('captured_at', endOfDay)
           .order('captured_at', { ascending: false }) as { data: Screenshot[] | null; error: PostgrestError | null };
+        if (legacyError) throw legacyError;
         if (legacyData && legacyData.length > 0) {
           console.log(`[Screenshots] Found ${legacyData.length} screenshots under legacy id ${legacyId} for date ${dateString}`);
           return legacyData;
         }
       }
     } catch (legacyErr) {
-      console.warn('[Screenshots] Legacy ID fallback lookup failed:', legacyErr);
+      console.error('[Screenshots] Legacy ID fallback lookup failed:', legacyErr);
+      throw legacyErr;
     }
   }
 

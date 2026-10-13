@@ -467,19 +467,23 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
   /* ── Screenshots + idle alerts ── */
   const selectedEmployeeId = selectedEmployee?.id;
   useEffect(() => {
-    if (!selectedEmployeeId) {
-      setActivityData(prev => ({ ...prev, screenshots: [] }));
-      setIdleAlerts([]);
-      setScreenshotsLoading(false);
+    if (!selectedEmployeeId || activeTab !== 'screenshots') {
+      if (!selectedEmployeeId) {
+        setActivityData(prev => ({ ...prev, screenshots: [] }));
+        setIdleAlerts([]);
+        setScreenshotsLoading(false);
+      }
       return;
     }
+
     let cancelled = false;
     const dateString = format(selectedDate, 'yyyy-MM-dd');
     setScreenshotsLoading(true);
     setScreenshotError('');
     setActivityData(prev => ({ ...prev, screenshots: [] }));
 
-    const loadScreenshots = async () => {
+    const loadScreenshots = async (showLoading: boolean) => {
+      if (showLoading) setScreenshotsLoading(true);
       try {
         const [remoteShots, alerts] = await Promise.all([
           getEmployeeScreenshotsByDate(selectedEmployeeId, dateString),
@@ -487,6 +491,7 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
         ]);
 
         if (cancelled) return;
+        setScreenshotError('');
         setIdleAlerts(alerts);
         setActivityData(prev => ({
           ...prev,
@@ -500,13 +505,17 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
         console.error('[MonitoringDashboard] Error loading screenshots:', error);
         if (!cancelled) setScreenshotError('Unable to load screenshots at this time.');
       } finally {
-        if (!cancelled) setScreenshotsLoading(false);
+        if (!cancelled && showLoading) setScreenshotsLoading(false);
       }
     };
 
-    void loadScreenshots();
-    return () => { cancelled = true; };
-  }, [selectedEmployeeId, selectedDate]);
+    void loadScreenshots(true);
+    const interval = setInterval(() => { void loadScreenshots(false); }, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [selectedEmployeeId, selectedDate, activeTab]);
 
   /* ── Formatters ── */
   const formatTime = (seconds: number) => {
