@@ -393,12 +393,10 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
     }
   }, [employees, selectedEmployee]);
 
-  /* ── Activity data + screenshots ── */
+  /* ── Activity summary ── */
   useEffect(() => {
     if (!selectedEmployee) return;
-    let cancelled = false;
 
-    // Immediately compute and apply non-async data so metrics update instantly
     const employeeSessions = sessions.filter((s) => s.employee_id === selectedEmployee.id);
     const selectedLogs = activityLogs.filter((l) => l.employee_id === selectedEmployee.id);
     const currentApp = selectedLogs.length > 0 ? selectedLogs[0].app_name : 'Unknown';
@@ -447,7 +445,6 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
       currentApp,
       sessionStartTime,
       activityLogs: mappedLogs,
-      screenshots: [], // clear stale screenshots from previous employee
     }));
 
     if (selectedSession?.punch_in_time) {
@@ -465,68 +462,51 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ defaultTab = 
       setSessionDuration('0h 0m');
     }
 
+  }, [selectedEmployee, sessions, activityLogs, selectedSession, selectedDate]);
+
+  /* ── Screenshots + idle alerts ── */
+  const selectedEmployeeId = selectedEmployee?.id;
+  useEffect(() => {
+    if (!selectedEmployeeId) {
+      setActivityData(prev => ({ ...prev, screenshots: [] }));
+      setIdleAlerts([]);
+      setScreenshotsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const dateString = format(selectedDate, 'yyyy-MM-dd');
+    setScreenshotsLoading(true);
+    setScreenshotError('');
+    setActivityData(prev => ({ ...prev, screenshots: [] }));
+
     const loadScreenshots = async () => {
-      setScreenshotsLoading(true);
-      setScreenshotError('');
       try {
-        const dateString = format(selectedDate, 'yyyy-MM-dd');
+        const [remoteShots, alerts] = await Promise.all([
+          getEmployeeScreenshotsByDate(selectedEmployeeId, dateString),
+          fetchIdleAlertsByDate(selectedEmployeeId, dateString),
+        ]);
 
-        const remoteShots = await getEmployeeScreenshotsByDate(selectedEmployee.id, dateString).catch(e => {
-          console.error('Error fetching screenshots:', e);
-          return [];
-        });
-
-        const alerts = await fetchIdleAlertsByDate(selectedEmployee.id, dateString).catch(e => {
-          console.error('Error fetching idle alerts:', e);
-          return [];
-        });
-
+        if (cancelled) return;
         setIdleAlerts(alerts);
-
-        if (!cancelled) {
-          setActivityData({
-            activeTime,
-            productiveTime,
-            nonproductiveTime: Math.max(0, activeTime - productiveTime),
-            idleTime,
-            awayTime: 0,
-            productivity,
-            currentApp,
-            sessionStartTime,
-            screenshots: remoteShots.map((s: any) => ({
-              timestamp: new Date(s.captured_at).toLocaleTimeString(),
-              url: normalizeScreenshotUrl(s.screenshot_data),
-              appName: s.app_name,
-            })),
-            activityLogs: mappedLogs,
-          });
-        }
+        setActivityData(prev => ({
+          ...prev,
+          screenshots: remoteShots.map(shot => ({
+            timestamp: new Date(shot.captured_at).toLocaleTimeString(),
+            url: normalizeScreenshotUrl(shot.screenshot_data),
+            appName: shot.app_name,
+          })),
+        }));
       } catch (error) {
-        console.error('Error loading data:', error);
-        if (!cancelled) {
-          setScreenshotError('Unable to load data at this time.');
-          setActivityData((prev) => ({
-            ...prev,
-            activeTime,
-            productiveTime,
-            nonproductiveTime: Math.max(0, activeTime - productiveTime),
-            idleTime,
-            awayTime: 0,
-            productivity,
-            currentApp,
-            sessionStartTime,
-            activityLogs: mappedLogs,
-          }));
-        }
+        console.error('[MonitoringDashboard] Error loading screenshots:', error);
+        if (!cancelled) setScreenshotError('Unable to load screenshots at this time.');
       } finally {
         if (!cancelled) setScreenshotsLoading(false);
       }
     };
 
-    loadScreenshots();
-
+    void loadScreenshots();
     return () => { cancelled = true; };
-  }, [selectedEmployee, sessions, activityLogs, selectedSession, selectedDate]);
+  }, [selectedEmployeeId, selectedDate]);
 
   /* ── Formatters ── */
   const formatTime = (seconds: number) => {
