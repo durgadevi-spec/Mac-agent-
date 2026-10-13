@@ -1,4 +1,4 @@
-import { app, nativeImage, systemPreferences } from 'electron';
+import { app, desktopCapturer, nativeImage, screen, systemPreferences } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import screenshot from 'screenshot-desktop';
@@ -26,6 +26,30 @@ let captureInitialScreenshot: (() => Promise<void>) | null = null;
 let isInitialCaptureInProgress = false;
 
 let shouldBlurScreenshots = false;
+
+async function captureScreen(): Promise<Buffer> {
+  if (process.platform !== 'darwin') {
+    return screenshot({ format: 'jpeg' });
+  }
+
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const sources = await desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize: { width: 1920, height: 1080 },
+  });
+  const source = sources.find(candidate => candidate.display_id === String(primaryDisplay.id))
+    ?? (sources.length === 1 ? sources[0] : undefined);
+
+  if (!source) {
+    throw new Error(`Could not find a screen capture source for primary display ${primaryDisplay.id}`);
+  }
+  if (source.thumbnail.isEmpty()) {
+    throw new Error(`Screen capture source "${source.name}" returned an empty image`);
+  }
+
+  debugLog(`[Screenshot] Using macOS screen source "${source.name}" (${source.display_id}) for primary display ${primaryDisplay.id}`);
+  return source.thumbnail.toJPEG(90);
+}
 
 export function updateScreenshotSettings(intervalMinutes: number, blur?: boolean) {
   if (blur !== undefined) {
@@ -93,7 +117,6 @@ export function startScreenshotService() {
         debugLog('[Screenshot] No employee currently logged in, skipping screenshot capture');
         return;
       }
-
       const activity = getCurrentActivity();
       // Only skip when the system is genuinely hardware-idle (no keyboard/mouse input).
       // Do NOT skip for 'away' state — that just means active-win failed to detect
@@ -109,7 +132,7 @@ export function startScreenshotService() {
       const filePath = path.join(screenshotDir, filename);
 
       // Capture screen
-      const imgBuffer = await screenshot({ format: 'jpeg' });
+      const imgBuffer = await captureScreen();
 
       // Compress and resize using Electron's nativeImage to occupy less storage
       const image = nativeImage.createFromBuffer(imgBuffer);
@@ -175,12 +198,11 @@ export function startScreenshotService() {
       const activity = getCurrentActivity();
       // Same rule: only skip on genuine hardware idle, not on 'away' state.
       if (activity.isIdle) return;
-
       const now = new Date();
       const filename = `screenshot_init_${now.getTime()}.jpg`;
       const filePath = path.join(screenshotDir, filename);
 
-      const imgBuffer = await screenshot({ format: 'jpeg' });
+      const imgBuffer = await captureScreen();
       const image = nativeImage.createFromBuffer(imgBuffer);
       let finalBuffer: Buffer;
 
