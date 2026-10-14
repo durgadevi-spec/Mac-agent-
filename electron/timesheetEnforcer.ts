@@ -248,11 +248,11 @@ export async function verifyManualLockForEmployee(employeeCode: string): Promise
 
     if (error || !employee?.id) {
       console.error('[TimesheetEnforcer] Unable to resolve employee for manual-lock check:', error);
-      return { verified: false, locked: true, adminUnlocked: false };
+      return { verified: false, locked: false, adminUnlocked: false };
     }
 
     const state = await getManualOverrideState(employee.id, new Date().toISOString().slice(0, 10));
-    if (state === 'ERROR') return { verified: false, locked: true, adminUnlocked: false };
+    if (state === 'ERROR') return { verified: false, locked: false, adminUnlocked: false };
     return {
       verified: true,
       locked: state === 'LOCKED',
@@ -260,7 +260,7 @@ export async function verifyManualLockForEmployee(employeeCode: string): Promise
     };
   } catch (error) {
     console.error('[TimesheetEnforcer] Manual-lock verification failed:', error);
-    return { verified: false, locked: true, adminUnlocked: false };
+    return { verified: false, locked: false, adminUnlocked: false };
   }
 }
 
@@ -354,7 +354,7 @@ export async function startTimesheetEnforcer(empCode: string, mainWindow: Browse
     console.log('[TimesheetEnforcer] Manual override state for', currentEmployee.employee_code, currentEmployee.id, todayDate, '=>', manualOverride);
     if (manualOverride === 'ERROR') {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('timesheet-lock', { date: todayDate, manual: true, verificationUnavailable: true });
+        mainWindow.webContents.send('timesheet-lock', { date: todayDate, manual: false, verificationUnavailable: true });
       }
       return; // Fail closed when admin lock state cannot be verified
     }

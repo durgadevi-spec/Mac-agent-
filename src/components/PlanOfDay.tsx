@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { ArrowLeft, ClipboardList, ExternalLink } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { ArrowLeft, ClipboardList, ExternalLink, Minus, Plus } from 'lucide-react';
 import { Employee, WorkSession, getTodaySession, markPlanAsSubmitted } from '../lib/supabase';
 import WindowControls from './WindowControls';
 
@@ -32,6 +32,31 @@ export default function PlanOfDay({
   const [portalOpened, setPortalOpened] = useState(false);
   const [punchError, setPunchError] = useState('');
   const [portalUrl, setPortalUrl] = useState('https://timestrap.space/plan-for-day');
+  const [portalZoom, setPortalZoom] = useState(1);
+
+  const adjustPortalZoom = useCallback((amount: number) => {
+    setPortalZoom(current => Math.min(1.5, Math.max(0.5, Math.round((current + amount) * 10) / 10)));
+  }, []);
+
+  useEffect(() => {
+    const handleZoomShortcut = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || phase !== 'form') return;
+
+      if (event.key === '+' || event.key === '=' || event.code === 'NumpadAdd') {
+        event.preventDefault();
+        adjustPortalZoom(0.1);
+      } else if (event.key === '-' || event.code === 'NumpadSubtract') {
+        event.preventDefault();
+        adjustPortalZoom(-0.1);
+      } else if (event.key === '0' || event.code === 'Numpad0') {
+        event.preventDefault();
+        setPortalZoom(1);
+      }
+    };
+
+    window.addEventListener('keydown', handleZoomShortcut);
+    return () => window.removeEventListener('keydown', handleZoomShortcut);
+  }, [adjustPortalZoom, phase]);
 
   useEffect(() => {
     if (portalOpened) return;
@@ -376,11 +401,44 @@ export default function PlanOfDay({
             <span className="text-sm font-medium text-gray-600">
               {portalUrl === 'https://timestrap.space/plan-for-day' ? 'Daily Plan Portal' : 'PMS Tasks'}
             </span>
+            <div className="ml-auto flex items-center gap-1" aria-label="Portal zoom controls">
+              <button
+                type="button"
+                onClick={() => adjustPortalZoom(-0.1)}
+                disabled={portalZoom <= 0.5}
+                title="Zoom out (Ctrl + -)"
+                aria-label="Zoom out"
+                className="rounded-md border border-pink-200 p-1.5 text-pink-600 hover:bg-pink-50 disabled:opacity-40"
+              >
+                <Minus className="h-4 w-4" />
+              </button>
+              <span className="min-w-12 text-center text-xs text-gray-500" aria-live="polite">
+                {Math.round(portalZoom * 100)}%
+              </span>
+              <button
+                type="button"
+                onClick={() => adjustPortalZoom(0.1)}
+                disabled={portalZoom >= 1.5}
+                title="Zoom in (Ctrl + +)"
+                aria-label="Zoom in"
+                className="rounded-md border border-pink-200 p-1.5 text-pink-600 hover:bg-pink-50 disabled:opacity-40"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setPortalZoom(1)}
+                title="Reset zoom (Ctrl + 0)"
+                className="rounded-md px-2 py-1.5 text-xs text-pink-600 hover:bg-pink-50"
+              >
+                Reset
+              </button>
+            </div>
             <a
               href={portalUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="ml-auto text-xs text-pink-500 hover:text-pink-600 underline"
+              className="text-xs text-pink-500 hover:text-pink-600 underline"
             >
               Open in browser
             </a>
@@ -390,6 +448,7 @@ export default function PlanOfDay({
               src={portalUrl}
               title="Daily Plan Portal"
               className="absolute inset-0 h-full w-full border-0"
+              style={{ zoom: portalZoom }}
             />
           </div>
         </div>

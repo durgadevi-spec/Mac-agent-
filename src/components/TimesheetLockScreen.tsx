@@ -6,10 +6,17 @@ interface Props {
   employee: Employee;
   date: string;
   manualLock?: boolean;
+  verificationUnavailable?: boolean;
   onUnlocked: () => void;
 }
 
-export default function TimesheetLockScreen({ employee, date, manualLock = false, onUnlocked }: Props) {
+export default function TimesheetLockScreen({
+  employee,
+  date,
+  manualLock = false,
+  verificationUnavailable = false,
+  onUnlocked,
+}: Props) {
   const [verifying, setVerifying] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -69,13 +76,19 @@ export default function TimesheetLockScreen({ employee, date, manualLock = false
         </div>
         
         <h1 className="text-3xl font-bold text-slate-900 mb-4">
-          {manualLock ? 'Manually Locked by Admin' : 'System Locked'}
+          {verificationUnavailable
+            ? 'Lock Status Unavailable'
+            : manualLock
+              ? 'Manually Locked by Admin'
+              : 'System Locked'}
         </h1>
         
         <p className="text-lg text-slate-600 mb-8">
-          {manualLock
-            ? 'Your administrator has manually locked this system. Please contact your administrator to request an unlock.'
-            : <>Your system has been locked because your timesheet for <strong>{date}</strong> has not been submitted. Please submit your timesheet or contact HR/IT Support.</>}
+          {verificationUnavailable
+            ? 'The system could not verify the administrator lock status. It will remain locked for safety; please retry or contact your administrator.'
+            : manualLock
+              ? 'Your administrator has manually locked this system. Please contact your administrator to request an unlock.'
+              : <>Your system has been locked because your timesheet for <strong>{date}</strong> has not been submitted. Please submit your timesheet or contact HR/IT Support.</>}
         </p>
 
         {errorMsg && (
@@ -99,7 +112,13 @@ export default function TimesheetLockScreen({ employee, date, manualLock = false
             className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-4 rounded-xl font-semibold transition-colors text-lg shadow-sm disabled:opacity-50"
           >
             {verifying ? <RefreshCw className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
-            {verifying ? 'Verifying...' : manualLock ? 'Verify Admin Unlock' : 'Back & Continue'}
+            {verifying
+              ? 'Verifying...'
+              : verificationUnavailable
+                ? 'Retry Verification'
+                : manualLock
+                  ? 'Verify Admin Unlock'
+                  : 'Back & Continue'}
           </button>
 
           <button
