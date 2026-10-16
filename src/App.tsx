@@ -41,11 +41,11 @@ export default function App() {
       try {
         const eApi = api();
         if (eApi) {
-          // Lock window AND enable kiosk mode (prevents Alt+Tab, minimizing, switching apps)
+          // Lock the app window; macOS also uses kiosk mode for the check-in flow.
           await eApi.setWindowClosable?.(false);
           await eApi.setWindowMinimizable?.(false);
           await eApi.enterKiosk?.();
-          console.log('[App] Window locked at startup + kiosk mode enabled - awaiting login');
+          console.log('[App] Window locked at startup - awaiting login');
         }
       } catch (err) {
         console.error('[App] Failed to lock window at startup:', err);
@@ -257,9 +257,9 @@ export default function App() {
           // Lock the window: prevent closing and minimizing
           await eApi?.setWindowClosable?.(false);
           await eApi?.setWindowMinimizable?.(false);
-          // Enable kiosk mode: prevent Alt+Tab and switching to other apps
+          // Enter the platform-specific locked presentation for the check-in flow.
           await eApi?.enterKiosk?.();
-          console.log(`[App] Window locked + kiosk enabled for screen: ${screen}`);
+          console.log(`[App] Window locked for screen: ${screen}`);
         } catch (err) {
           console.error(`[App] Failed to lock window for ${screen}:`, err);
         }
@@ -269,7 +269,7 @@ export default function App() {
           // Unlock: allow closing, minimizing, and switching apps
           await eApi?.setWindowClosable?.(true);
           await eApi?.setWindowMinimizable?.(true);
-          // Exit kiosk mode: allow Alt+Tab and switching to other apps
+          // Restore the regular platform window presentation.
           await eApi?.exitKiosk?.();
           console.log(`[App] Window unlocked + kiosk disabled for screen: ${screen}`);
         } catch (err) {

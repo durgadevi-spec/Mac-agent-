@@ -569,8 +569,10 @@ async function createWindow() {
         mainWindow?.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
         mainWindow?.setKiosk(true);
         mainWindow?.setFullScreen(true);
+        mainWindow?.setAlwaysOnTop(true, 'screen-saver');
+      } else if (process.platform === 'win32') {
+        mainWindow?.maximize();
       }
-      mainWindow?.setAlwaysOnTop(true, 'screen-saver');
       mainWindow?.focus();
       syncLockedWindowFocusEnforcement();
     } else {
@@ -585,6 +587,15 @@ async function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  mainWindow.on('session-end', () => {
+    if (process.platform !== 'win32') return;
+
+    console.info('[Main] Windows session is ending; allowing shutdown, restart, or logoff');
+    isQuitting = true;
+    mainWindow?.setKiosk(false);
+    mainWindow?.setAlwaysOnTop(false);
   });
 
   mainWindow.on('minimize', (event: any) => {
@@ -906,10 +917,10 @@ ipcMain.handle('enter-kiosk', async () => {
     if (mainWindow) {
       if (process.platform === 'darwin') {
         mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+        mainWindow.setKiosk(true);
+        mainWindow.setFullScreen(true);
+        mainWindow.setAlwaysOnTop(true, 'screen-saver');
       }
-      mainWindow.setKiosk(true);
-      if (process.platform === 'darwin') mainWindow.setFullScreen(true);
-      mainWindow.setAlwaysOnTop(true, 'screen-saver');
       mainWindow.show(); mainWindow.focus();
     }
     syncLockedWindowFocusEnforcement();
@@ -922,8 +933,10 @@ ipcMain.handle('exit-kiosk', async () => {
     windowLocked = false;
     syncLockedWindowFocusEnforcement();
     if (mainWindow) {
-      mainWindow.setKiosk(false);
-      if (process.platform === 'darwin') mainWindow.setFullScreen(false);
+      if (process.platform === 'darwin') {
+        mainWindow.setKiosk(false);
+        mainWindow.setFullScreen(false);
+      }
       mainWindow.setAlwaysOnTop(false);
       if (process.platform === 'darwin') mainWindow.setVisibleOnAllWorkspaces(false);
       mainWindow.show(); mainWindow.focus();
