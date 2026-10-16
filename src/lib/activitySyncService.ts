@@ -167,6 +167,7 @@ class ActivitySyncService {
           duration_seconds: log.durationSeconds,
         })),
         screenshots: localScreenshots.map(s => ({
+          id: s.id,
           employee_id: s.employee_id,
           app_name: s.app_name,
           captured_at: s.captured_at,
