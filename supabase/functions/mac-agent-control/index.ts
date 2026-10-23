@@ -7,10 +7,19 @@ const corsHeaders = {
 };
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
-const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-const service = createClient(supabaseUrl, serviceRoleKey, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
+const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('SUPABASE_SERVICE_KEY') || '';
+let service!: ReturnType<typeof createClient>;
+
+function buildServiceClient() {
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error('Missing Edge Function secrets: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.');
+  }
+
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
 const onlineWindowMs = 35_000;
 const authWindowMs = 15 * 60_000;
 const maxFailedAttempts = 5;
@@ -211,6 +220,14 @@ Deno.serve(async (request: Request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (request.method !== 'POST') return json({ error: 'POST required.' }, 405);
   if (!supabaseUrl || !serviceRoleKey) return json({ error: 'Mac agent control is not configured.' }, 503);
+
+  if (!service) {
+    try {
+      service = buildServiceClient();
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : 'Edge function configuration failed.' }, 503);
+    }
+  }
 
   let body: any;
   try {
