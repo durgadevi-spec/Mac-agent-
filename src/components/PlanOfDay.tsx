@@ -399,7 +399,9 @@ export default function PlanOfDay({
           <div className="shrink-0 bg-gradient-to-r from-pink-50 to-rose-50 border-b border-pink-100 px-4 py-3 flex items-center gap-2">
             <ExternalLink className="w-4 h-4 text-pink-400" />
             <span className="text-sm font-medium text-gray-600">
-              {portalUrl === 'https://timestrap.space/plan-for-day' ? 'Daily Plan Portal' : 'PMS Tasks'}
+              {portalUrl === 'https://timestrap.space/plan-for-day'
+                ? 'Daily Plan Portal'
+                : portalUrl === 'http://147.93.28.144:5002/tasks' ? 'PMS Tasks' : 'LMS'}
             </span>
             <div className="ml-auto flex items-center gap-1" aria-label="Portal zoom controls">
               <button
@@ -446,7 +448,9 @@ export default function PlanOfDay({
           <div className="relative min-h-0 flex-1 w-full overflow-hidden bg-gray-50">
             <iframe
               src={portalUrl}
-              title="Daily Plan Portal"
+              title={portalUrl === 'https://timestrap.space/plan-for-day'
+                ? 'Daily Plan Portal'
+                : portalUrl === 'http://147.93.28.144:5002/tasks' ? 'PMS Tasks' : 'LMS'}
               className="absolute inset-0 h-full w-full border-0"
               style={{ zoom: portalZoom }}
             />
@@ -468,13 +472,22 @@ export default function PlanOfDay({
                 Continue
               </button>
               {portalUrl === 'https://timestrap.space/plan-for-day' ? (
-                <button
-                  type="button"
-                  onClick={() => setPortalUrl('http://147.93.28.144:5002/tasks')}
-                  className="flex-1 border border-pink-200 text-pink-600 font-semibold py-3 rounded-xl hover:bg-pink-50 transition"
-                >
-                  PMS - Upload New Task
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setPortalUrl('http://147.93.28.144:5002/tasks')}
+                    className="flex-1 border border-pink-200 text-pink-600 font-semibold py-3 rounded-xl hover:bg-pink-50 transition"
+                  >
+                    PMS - Upload New Task
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPortalUrl('http://147.93.28.144:5001/')}
+                    className="flex-1 border border-pink-200 text-pink-600 font-semibold py-3 rounded-xl hover:bg-pink-50 transition"
+                  >
+                    LMS
+                  </button>
+                </>
               ) : (
                 <button
                   type="button"

@@ -45,6 +45,28 @@ export async function fetchAppSettings() {
   }
 }
 
+function getIndiaDate(date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const dateParts = Object.fromEntries(parts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+  return `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+}
+
+function shiftDate(dateStr: string, days: number): string {
+  const date = new Date(`${dateStr}T12:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function getWeekday(dateStr: string): string {
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' })
+    .format(new Date(`${dateStr}T12:00:00.000Z`));
+}
+
 export function getPreviousWorkingDate(): string | null {
   const now = new Date();
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -54,11 +76,30 @@ export function getPreviousWorkingDate(): string | null {
     day: '2-digit',
   }).formatToParts(now);
   const dateParts = Object.fromEntries(parts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
-  const today = new Date(Date.UTC(Number(dateParts.year), Number(dateParts.month) - 1, Number(dateParts.day)));
+  const todayDate = new Date(Date.UTC(Number(dateParts.year), Number(dateParts.month) - 1, Number(dateParts.day)));
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(now);
   if (weekday === 'Sun') return null;
-  today.setUTCDate(today.getUTCDate() - (weekday === 'Mon' ? 2 : 1));
-  return today.toISOString().slice(0, 10);
+  todayDate.setUTCDate(todayDate.getUTCDate() - (weekday === 'Mon' ? 2 : 1));
+  return todayDate.toISOString().slice(0, 10);
+}
+
+async function getPreviousNonLeaveWorkingDate(empCode: string, todayDate: string): Promise<string | null> {
+  let date = shiftDate(todayDate, -1);
+
+  for (let attempts = 0; attempts < 370; attempts++) {
+    if (getWeekday(date) === 'Sun') {
+      date = shiftDate(date, -1);
+      continue;
+    }
+
+    const leaveStatus = await checkLeaveStatus(empCode, date);
+    if (!leaveStatus.isOnLeave) return date;
+
+    const leaveStartDate = leaveStatus.startDate?.slice(0, 10);
+    date = shiftDate(leaveStartDate && leaveStartDate < date ? leaveStartDate : date, -1);
+  }
+
+  return null;
 }
 
 export async function checkLeaveStatus(empCode: string, dateStr: string): Promise<{
@@ -349,7 +390,7 @@ export async function startTimesheetEnforcer(empCode: string, mainWindow: Browse
     if (currentEmployee.timesheet_exempt) return; // Exempt bypass
     if (appSettings['enable_lock_screen_enforcement'] !== 'true') return; // Globally disabled
 
-    const todayDate = new Date().toISOString().slice(0, 10);
+    const todayDate = getIndiaDate();
     const manualOverride = await getManualOverrideState(currentEmployee.id, todayDate);
     console.log('[TimesheetEnforcer] Manual override state for', currentEmployee.employee_code, currentEmployee.id, todayDate, '=>', manualOverride);
     if (manualOverride === 'ERROR') {
@@ -371,21 +412,28 @@ export async function startTimesheetEnforcer(empCode: string, mainWindow: Browse
       return; // Manually unlocked today
     }
 
-    const prevDate = getPreviousWorkingDate();
-    if (!prevDate) {
+    if (getWeekday(todayDate) === 'Sun') {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('timesheet-unlock');
       }
       return; // Sunday bypass
     }
 
-    const leaveStatus = await checkLeaveStatus(currentEmployee.employee_code, prevDate);
-    if (leaveStatus.isOnLeave) {
-      console.log('[TimesheetEnforcer] Leave bypass for', currentEmployee.employee_code, prevDate, 'Reason:', leaveStatus.reason);
+    const todayLeaveStatus = await checkLeaveStatus(currentEmployee.employee_code, todayDate);
+    if (todayLeaveStatus.isOnLeave) {
+      console.log('[TimesheetEnforcer] Current-day leave bypass for', currentEmployee.employee_code, todayDate, 'Reason:', todayLeaveStatus.reason);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('timesheet-unlock');
       }
-      return; // Leave bypass
+      return; // Do not enforce a timesheet lock on an approved leave/holiday
+    }
+
+    const prevDate = await getPreviousNonLeaveWorkingDate(currentEmployee.employee_code, todayDate);
+    if (!prevDate) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('timesheet-unlock');
+      }
+      return;
     }
 
     const isSubmitted = await checkTimesheetSubmitted(currentEmployee.employee_code, prevDate);

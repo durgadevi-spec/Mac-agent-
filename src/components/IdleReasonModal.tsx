@@ -63,11 +63,11 @@ export default function IdleReasonModal({
 
   return (
     <div 
-      className="fixed inset-0 bg-white/40 backdrop-blur-sm z-[9999] flex flex-col items-center justify-center"
+      className="fixed inset-0 bg-slate-950/40 backdrop-blur-sm z-[9999] flex flex-col items-center justify-center"
       onClick={handleOverlayClick}
     >
       <div 
-        className="w-full max-w-lg bg-white rounded shadow-2xl border border-slate-200 overflow-hidden flex flex-col"
+        className="w-full max-w-lg bg-white rounded shadow-2xl border-2 border-slate-500 overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
         style={{ minHeight: '400px' }}
       >
