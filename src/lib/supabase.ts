@@ -14,6 +14,25 @@ const getSupabaseAnonKey = (): string => {
   return process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 };
 
+const getSupabaseConfigError = (): string => {
+  const supabaseUrl = getSupabaseUrl();
+  const supabaseAnonKey = getSupabaseAnonKey();
+  const serviceKey = process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || '';
+
+  if (!supabaseUrl) {
+    return 'Supabase configuration error: missing VITE_SUPABASE_URL or SUPABASE_URL. Add the project URL to your .env file.';
+  }
+
+  if (!supabaseAnonKey) {
+    if (serviceKey) {
+      return 'Supabase configuration error: Edge functions require the anon key, not a service-role key. Add VITE_SUPABASE_ANON_KEY or SUPABASE_ANON_KEY to .env.';
+    }
+    return 'Supabase configuration error: missing VITE_SUPABASE_ANON_KEY or SUPABASE_ANON_KEY. Add the browser anon key to .env.';
+  }
+
+  return 'Supabase configuration error: unknown initialization failure.';
+};
+
 let supabaseClient: SupabaseClient | null = null;
 
 const initializeSupabase = (): SupabaseClient => {
@@ -25,10 +44,10 @@ const initializeSupabase = (): SupabaseClient => {
   const supabaseAnonKey = getSupabaseAnonKey();
 
   if (!supabaseUrl) {
-    throw new Error('Supabase initialization failed: VITE_SUPABASE_URL or SUPABASE_URL is required.');
+    throw new Error(getSupabaseConfigError());
   }
   if (!supabaseAnonKey) {
-    throw new Error('Supabase initialization failed: VITE_SUPABASE_ANON_KEY or SUPABASE_ANON_KEY is required.');
+    throw new Error(getSupabaseConfigError());
   }
 
   supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
