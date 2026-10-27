@@ -56,6 +56,17 @@ function getIndiaDate(date = new Date()): string {
   return `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
 }
 
+function getIndiaMinutes(date = new Date()): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const timeParts = Object.fromEntries(parts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+  return Number(timeParts.hour) * 60 + Number(timeParts.minute);
+}
+
 function shiftDate(dateStr: string, days: number): string {
   const date = new Date(`${dateStr}T12:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + days);
@@ -394,10 +405,7 @@ export async function startTimesheetEnforcer(empCode: string, mainWindow: Browse
     const manualOverride = await getManualOverrideState(currentEmployee.id, todayDate);
     console.log('[TimesheetEnforcer] Manual override state for', currentEmployee.employee_code, currentEmployee.id, todayDate, '=>', manualOverride);
     if (manualOverride === 'ERROR') {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('timesheet-lock', { date: todayDate, manual: false, verificationUnavailable: true });
-      }
-      return; // Fail closed when admin lock state cannot be verified
+      console.warn('[TimesheetEnforcer] Could not verify manual override; continuing with timesheet deadline rules only');
     }
     if (manualOverride === 'LOCKED') {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -445,10 +453,8 @@ export async function startTimesheetEnforcer(empCode: string, mainWindow: Browse
       }
       return; // Already submitted
     }
-
     // Parse times
-    const now = new Date();
-    const currentMins = now.getHours() * 60 + now.getMinutes();
+    const currentMins = getIndiaMinutes();
 
     const checkTimeParts = appSettings['timesheet_check_time'].split(':');
     const checkMins = parseInt(checkTimeParts[0]) * 60 + parseInt(checkTimeParts[1]);

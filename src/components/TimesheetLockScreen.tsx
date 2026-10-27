@@ -88,7 +88,7 @@ export default function TimesheetLockScreen({
             ? 'The system could not verify the administrator lock status. It will remain locked for safety; please retry or contact your administrator.'
             : manualLock
               ? 'Your administrator has manually locked this system. Please contact your administrator to request an unlock.'
-              : <>Your system has been locked because your timesheet for <strong>{date}</strong> has not been submitted. Please submit your timesheet or contact HR/IT Support.</>}
+              : <>You have not submitted your timesheet for <strong>{date}</strong>. Please submit it to unlock the system, or contact HR/IT Support.</>}
         </p>
 
         {errorMsg && (
