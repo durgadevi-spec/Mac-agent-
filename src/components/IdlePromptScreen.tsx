@@ -18,6 +18,7 @@ export default function IdlePromptScreen() {
     // Extract start time from URL
     const searchParams = new URLSearchParams(window.location.hash.split('?')[1]);
     const startParam = searchParams.get('start');
+    const resumedAfterSuspend = searchParams.get('resume') === '1';
     if (startParam) {
       setIdleStartTime(parseInt(startParam, 10));
     } else {
@@ -45,7 +46,7 @@ export default function IdlePromptScreen() {
       const api = (window as any).electronAPI;
       if (api?.getSystemIdleTime) {
         const sysIdle = await api.getSystemIdleTime();
-        if (sysIdle < 2 && stepRef.current === 'countdown') {
+        if (!resumedAfterSuspend && sysIdle < 2 && stepRef.current === 'countdown') {
           api?.closeIdlePromptWindow?.();
         }
       }

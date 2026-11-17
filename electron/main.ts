@@ -1303,8 +1303,10 @@ ipcMain.handle('open-timesheet-browser', async () => {
 
     timesheetWin.loadURL(timesheetUrl);
     timesheetWin.maximize();
+    const timesheetOrigin = new URL(timesheetUrl).origin;
     timesheetWin.webContents.on('did-finish-load', () => {
       timesheetWin.webContents.executeJavaScript(`(() => {
+        if (window.location.origin !== ${JSON.stringify(timesheetOrigin)}) return;
         if (document.getElementById('knockturn-portal-actions')) return;
         const actions = document.createElement('div');
         actions.id = 'knockturn-portal-actions';

@@ -82,8 +82,9 @@ The app requires the following macOS permissions:
 1. **Accessibility** — To detect active windows
    - System Preferences → Security & Privacy → Accessibility
    
-2. **Screen Recording** — To capture screenshots (optional)
-   - System Preferences → Security & Privacy → Screen Recording
+2. **Screen Recording** — Required for accurate screenshots
+   - System Settings → Privacy & Security → Screen Recording
+   - Enable Knockturn Employee Agent, then quit and reopen the app
 
 3. **Network** — For API communication and email
 

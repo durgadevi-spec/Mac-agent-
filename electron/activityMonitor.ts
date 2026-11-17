@@ -7,6 +7,8 @@ import {
   MACOS_WINDOW_DETECTION_SCRIPT,
   MACOS_WINDOW_DETECTION_SCRIPT_VERSION,
   getMacOSBrowserTitleScript,
+  getMacOSDocumentName,
+  getMacOSExcelWorkbookNameScript,
   parseMacWindowDetectionOutput,
 } from './macosWindowDetection.js';
 
@@ -19,6 +21,7 @@ export interface WindowInfo {
   appName: string;
   windowTitle: string;
   website?: string;
+  bounds?: { x: number; y: number; width: number; height: number };
 }
 
 export interface SystemActivity {
@@ -94,6 +97,9 @@ let isRefreshInProgress = false;
 let currentLog: ActivityLog | null = null;
 let activityLogs: ActivityLog[] = [];
 let lastActivityDiskSaveAt = 0;
+let powerSuspendListener: (() => void) | null = null;
+let powerResumeListener: (() => void) | null = null;
+let idleStartBeforeSuspend: number | null = null;
 
 // System metrics cache
 let lastCpuUsage = 0;
@@ -162,13 +168,15 @@ function writePsScriptIfNotExist() {
 
 // macOS AppleScript fallback (cached 1s)
 let _macFallbackTs = 0;
-let _macFallbackCache: { ownerName: string; windowTitle: string } = { ownerName: 'Unknown', windowTitle: 'Unknown' };
+let _macFallbackCache: { ownerName: string; windowTitle: string; documentUrl?: string } = { ownerName: 'Unknown', windowTitle: 'Unknown' };
 
 let _lastDetectionLog = '';
 let _lastMacErrorLog = '';
 let _lastMacErrorLogAt = 0;
 let _lastMacBrowserErrorLog = '';
 let _lastMacBrowserErrorLogAt = 0;
+let _lastMacExcelErrorLog = '';
+let _lastMacExcelErrorLogAt = 0;
 
 interface AppleScriptExecutionResult {
   stdout: string;
@@ -213,7 +221,29 @@ async function getMacOSBrowserTitle(appName: string): Promise<string | undefined
   return undefined;
 }
 
-async function getWindowViaMacFallback(): Promise<{ ownerName: string; windowTitle: string }> {
+async function getMacOSExcelWorkbookName(appName: string): Promise<string | undefined> {
+  const script = getMacOSExcelWorkbookNameScript(appName);
+  if (!script) return undefined;
+
+  const result = await runAppleScript(['-e', script], 2000);
+  if (!result.error && result.exitCode === 0 && result.stdout) return result.stdout;
+
+  const errorDetails = [
+    result.error ? String(result.error) : '',
+    `exitCode=${result.exitCode}`,
+    `stdout=${JSON.stringify(result.stdout)}`,
+    `stderr=${JSON.stringify(result.stderr)}`,
+  ].filter(Boolean).join(' ');
+  const now = Date.now();
+  if (errorDetails !== _lastMacExcelErrorLog || now - _lastMacExcelErrorLogAt >= 30000) {
+    console.warn(`[Monitor] Excel workbook-name lookup failed: ${errorDetails}`);
+    _lastMacExcelErrorLog = errorDetails;
+    _lastMacExcelErrorLogAt = now;
+  }
+  return undefined;
+}
+
+async function getWindowViaMacFallback(): Promise<{ ownerName: string; windowTitle: string; documentUrl?: string }> {
   const now = Date.now();
   if (now - _macFallbackTs < 1000) return { ..._macFallbackCache };
   _macFallbackTs = now;
@@ -249,7 +279,11 @@ async function getWindowViaMacFallback(): Promise<{ ownerName: string; windowTit
     return { ..._macFallbackCache };
   }
 
-  _macFallbackCache = { ownerName: detected.ownerName, windowTitle: detected.windowTitle };
+  _macFallbackCache = {
+    ownerName: detected.ownerName,
+    windowTitle: detected.windowTitle,
+    documentUrl: detected.documentUrl,
+  };
   const detectionLog = `${detected.ownerName}|${detected.windowTitle}`;
   if (detectionLog !== _lastDetectionLog) {
     console.info(
@@ -503,6 +537,8 @@ async function refreshActivity() {
 
     let ownerName = 'Unknown';
     let windowTitle = 'Unknown';
+    let documentUrl: string | undefined;
+    let windowBounds: WindowInfo['bounds'];
 
     // Primary: active-win. On macOS, run the AppleScript fallback when either
     // the application or its title is unavailable.
@@ -533,6 +569,18 @@ async function refreshActivity() {
       if (active?.owner?.name) {
         ownerName = normalizeAppName(active.owner.name);
         windowTitle = active.title || 'Unknown';
+        const bounds = active.bounds;
+        if (
+          bounds &&
+          Number.isFinite(bounds.x) &&
+          Number.isFinite(bounds.y) &&
+          Number.isFinite(bounds.width) &&
+          Number.isFinite(bounds.height) &&
+          bounds.width > 0 &&
+          bounds.height > 0
+        ) {
+          windowBounds = bounds;
+        }
         const detectionLog = `${ownerName}|${windowTitle}`;
         if (detectionLog !== _lastDetectionLog) {
           console.info(`[Monitor] active-win detected app=${JSON.stringify(ownerName)} title=${JSON.stringify(windowTitle)}`);
@@ -547,11 +595,15 @@ async function refreshActivity() {
 
     // Fallback: PowerShell Win32 API / AppleScript macOS
     if (process.platform === 'darwin' && (
-      ownerName === 'Unknown' || ownerName === '' || windowTitle === 'Unknown'
+      ownerName === 'Unknown' ||
+      ownerName === '' ||
+      windowTitle === 'Unknown' ||
+      normalizeAppName(windowTitle).toLowerCase() === ownerName.toLowerCase()
     )) {
       const fb = await getWindowViaMacFallback();
       if (fb.ownerName && fb.ownerName !== 'Unknown') ownerName = normalizeAppName(fb.ownerName);
       if (fb.windowTitle && fb.windowTitle !== 'Unknown') windowTitle = fb.windowTitle;
+      documentUrl = fb.documentUrl;
     } else if (ownerName === 'Unknown' || ownerName === '') {
       if (process.platform === 'win32') {
         const fb = getWindowViaFallback();
@@ -563,6 +615,10 @@ async function refreshActivity() {
     if (process.platform === 'darwin' && ownerName !== 'Unknown') {
       const browserTitle = await getMacOSBrowserTitle(ownerName);
       if (browserTitle) windowTitle = browserTitle;
+      const documentName = getMacOSDocumentName(documentUrl);
+      if (documentName) windowTitle = documentName;
+      const excelWorkbookName = await getMacOSExcelWorkbookName(ownerName);
+      if (excelWorkbookName) windowTitle = excelWorkbookName;
       if (!windowTitle || windowTitle === 'Unknown') windowTitle = ownerName;
 
       const detectionLog = `${ownerName}|${windowTitle}`;
@@ -595,7 +651,7 @@ async function refreshActivity() {
     if (isIdle) {
       if (!mainProcessIdlePrompted) {
         mainProcessIdlePrompted = true;
-        showIdlePromptWindow(Date.now() - (activityState.idleSeconds * 1000));
+        showIdlePromptWindow(lastInputTime);
       }
     } else {
       mainProcessIdlePrompted = false;
@@ -625,7 +681,12 @@ async function refreshActivity() {
       }
     }
 
-    activityState.activeWindow = { appName: ownerName, windowTitle, website };
+    activityState.activeWindow = {
+      appName: ownerName,
+      windowTitle,
+      website,
+      ...(windowBounds ? { bounds: windowBounds } : {}),
+    };
     activityState.systemIdleSeconds = systemIdleSeconds;
     activityState.idleTimeMs = Math.floor(systemIdleSeconds * 1000);
     activityState.isIdle = isIdle;
@@ -771,6 +832,30 @@ export function startBackgroundMonitoring() {
   if (monitoringStarted) return;
   monitoringStarted = true;
   currentTrackingDate = new Date().toISOString().slice(0, 10);
+  idleStartBeforeSuspend = null;
+  powerSuspendListener = () => {
+    idleStartBeforeSuspend = lastInputTime;
+    console.info('[Monitor] System suspend detected; saved last activity time');
+  };
+  powerResumeListener = async () => {
+    const idleStartTime = idleStartBeforeSuspend;
+    idleStartBeforeSuspend = null;
+    if (!monitoringStarted || idleStartTime === null || mainProcessIdlePrompted) return;
+
+    const idleDurationMs = Date.now() - idleStartTime;
+    if (idleDurationMs < idleThresholdSeconds * 1000) return;
+
+    mainProcessIdlePrompted = true;
+    console.info(`[Monitor] Resumed after ${Math.floor(idleDurationMs / 1000)} seconds idle; showing idle-reason prompt`);
+    try {
+      await showIdlePromptWindow(idleStartTime, true);
+    } catch (error) {
+      mainProcessIdlePrompted = false;
+      console.error('[Monitor] Failed to show idle prompt after system resume:', error);
+    }
+  };
+  powerMonitor.on('suspend', powerSuspendListener);
+  powerMonitor.on('resume', powerResumeListener);
   writePsScriptIfNotExist();
   loadLogsFromDisk();
   // Pre-load systeminformation in background
@@ -782,6 +867,15 @@ export function startBackgroundMonitoring() {
 }
 
 export function stopBackgroundMonitoring() {
+  if (powerSuspendListener) {
+    powerMonitor.removeListener('suspend', powerSuspendListener);
+    powerSuspendListener = null;
+  }
+  if (powerResumeListener) {
+    powerMonitor.removeListener('resume', powerResumeListener);
+    powerResumeListener = null;
+  }
+  idleStartBeforeSuspend = null;
   if (monitorInterval) {
     clearInterval(monitorInterval);
     monitorInterval = null;

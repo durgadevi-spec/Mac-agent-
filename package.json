@@ -110,7 +110,13 @@
       "icon": "assets/icon.png",
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
-      "minimumSystemVersion": "10.15.0"
+      "minimumSystemVersion": "10.15.0",
+      "entitlements": "mac/entitlements.mac.plist",
+      "entitlementsInherit": "mac/entitlements.mac.plist",
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "Knockturn Employee Agent needs to send Apple Events to System Events, Chrome, Safari, and Microsoft Excel to record active apps, window titles, and document names when available for time tracking.",
+        "NSSystemAdministrationUsageDescription": "Knockturn Employee Agent needs this permission to record active app and window usage for time tracking."
+      }
     }
   }
 }

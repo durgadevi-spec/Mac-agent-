@@ -27,27 +27,37 @@ let isInitialCaptureInProgress = false;
 
 let shouldBlurScreenshots = false;
 
-async function captureScreen(): Promise<Buffer> {
+async function captureScreen(bounds?: { x: number; y: number; width: number; height: number }): Promise<Buffer> {
   if (process.platform !== 'darwin') {
     return screenshot({ format: 'jpeg' });
   }
 
-  const primaryDisplay = screen.getPrimaryDisplay();
+  const screenAccessStatus = systemPreferences.getMediaAccessStatus('screen');
+  if (screenAccessStatus !== 'granted') {
+    throw new Error(
+      `macOS Screen Recording permission is ${screenAccessStatus}. Enable Knockturn Employee Agent in System Settings > Privacy & Security > Screen Recording, then restart the app.`
+    );
+  }
+
+  const cursorDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const targetDisplay = bounds && bounds.width > 0 && bounds.height > 0
+    ? screen.getDisplayMatching(bounds)
+    : cursorDisplay;
   const sources = await desktopCapturer.getSources({
     types: ['screen'],
     thumbnailSize: { width: 1920, height: 1080 },
   });
-  const source = sources.find(candidate => candidate.display_id === String(primaryDisplay.id))
+  const source = sources.find(candidate => candidate.display_id === String(targetDisplay.id))
     ?? (sources.length === 1 ? sources[0] : undefined);
 
   if (!source) {
-    throw new Error(`Could not find a screen capture source for primary display ${primaryDisplay.id}`);
+    throw new Error(`Could not find a screen capture source for active display ${targetDisplay.id}`);
   }
   if (source.thumbnail.isEmpty()) {
     throw new Error(`Screen capture source "${source.name}" returned an empty image`);
   }
 
-  debugLog(`[Screenshot] Using macOS screen source "${source.name}" (${source.display_id}) for primary display ${primaryDisplay.id}`);
+  debugLog(`[Screenshot] Using macOS screen source "${source.name}" (${source.display_id}) for active display ${targetDisplay.id}`);
   return source.thumbnail.toJPEG(90);
 }
 
@@ -132,7 +142,7 @@ export function startScreenshotService() {
       const filePath = path.join(screenshotDir, filename);
 
       // Capture screen
-      const imgBuffer = await captureScreen();
+      const imgBuffer = await captureScreen(activity.activeWindow.bounds);
 
       // Compress and resize using Electron's nativeImage to occupy less storage
       const image = nativeImage.createFromBuffer(imgBuffer);
@@ -202,7 +212,7 @@ export function startScreenshotService() {
       const filename = `screenshot_init_${now.getTime()}.jpg`;
       const filePath = path.join(screenshotDir, filename);
 
-      const imgBuffer = await captureScreen();
+      const imgBuffer = await captureScreen(activity.activeWindow.bounds);
       const image = nativeImage.createFromBuffer(imgBuffer);
       let finalBuffer: Buffer;
 

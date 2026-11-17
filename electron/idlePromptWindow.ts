@@ -43,7 +43,7 @@ async function resolveStartUrl() {
   return `file://${indexPath}`;
 }
 
-export async function showIdlePromptWindow(idleStartTimeMs: number) {
+export async function showIdlePromptWindow(idleStartTimeMs: number, resumedAfterSuspend = false) {
   if (idleWindow && !idleWindow.isDestroyed()) {
     focusIdlePromptWindow();
     return;
@@ -78,7 +78,8 @@ export async function showIdlePromptWindow(idleStartTimeMs: number) {
 
   const startUrl = await resolveStartUrl();
   // Pass the start time as a query parameter
-  await idleWindow.loadURL(`${startUrl}#/idle-prompt?start=${idleStartTimeMs}`);
+  const resumeParam = resumedAfterSuspend ? '&resume=1' : '';
+  await idleWindow.loadURL(`${startUrl}#/idle-prompt?start=${idleStartTimeMs}${resumeParam}`);
   focusIdlePromptWindow();
 
   idleWindow.on('closed', () => {
