@@ -191,6 +191,7 @@ export { getTimesheetDbUrl };
 
 let mainWindow: BrowserWindow | null = null;
 let timesheetWindow: BrowserWindow | null = null;
+let timesheetPortalUrl: string | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let windowLocked = true;
@@ -1282,7 +1283,7 @@ ipcMain.handle('open-timesheet-browser', async () => {
       width: 1000,
       height: 800,
       parent: mainWindow || undefined,
-      modal: !!mainWindow,
+      modal: !!mainWindow && process.platform !== 'darwin',
       autoHideMenuBar: true,
       show: true,
       webPreferences: {
@@ -1292,6 +1293,10 @@ ipcMain.handle('open-timesheet-browser', async () => {
       }
     });
     timesheetWindow = timesheetWin;
+    timesheetPortalUrl = timesheetUrl;
+    if (process.platform === 'darwin' && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setAlwaysOnTop(false);
+    }
 
     // Position it slightly off-center if there's a main window so it feels like a modal overlay
     if (mainWindow) {
@@ -1303,16 +1308,18 @@ ipcMain.handle('open-timesheet-browser', async () => {
 
     timesheetWin.loadURL(timesheetUrl);
     timesheetWin.maximize();
-    const timesheetOrigin = new URL(timesheetUrl).origin;
+    const pmsOrigin = new URL('https://effilynx.in/').origin;
+    const allowedPortalOrigins = [new URL(timesheetUrl).origin, pmsOrigin];
     timesheetWin.webContents.on('did-finish-load', () => {
       timesheetWin.webContents.executeJavaScript(`(() => {
-        if (window.location.origin !== ${JSON.stringify(timesheetOrigin)}) return;
+        if (!${JSON.stringify(allowedPortalOrigins)}.includes(window.location.origin)) return;
         if (document.getElementById('knockturn-portal-actions')) return;
         const actions = document.createElement('div');
         actions.id = 'knockturn-portal-actions';
         Object.assign(actions.style, {
-          position: 'fixed', top: '12px', left: '12px', zIndex: '2147483647',
-          display: 'flex', flexDirection: 'column', gap: '8px'
+          position: 'fixed', bottom: '12px', left: '12px', zIndex: '2147483647',
+          display: 'flex', flexDirection: 'column', gap: '8px',
+          pointerEvents: 'none'
         });
 
         const makeButton = (id, label, background, onClick) => {
@@ -1323,14 +1330,34 @@ ipcMain.handle('open-timesheet-browser', async () => {
           Object.assign(button.style, {
             padding: '9px 14px', border: '0', borderRadius: '7px',
             background, color: '#fff', font: '600 14px system-ui',
-            cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,.25)'
+            cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,.25)',
+            pointerEvents: 'auto'
           });
           button.addEventListener('click', onClick);
           actions.appendChild(button);
         };
 
-        makeButton('knockturn-home-button', 'Back to Homepage', '#b42332', () => window.timesheetAPI?.close());
-        makeButton('knockturn-pms-button', 'Add Task from PMS', '#175cd3', () => window.timesheetAPI?.openPms());
+        makeButton(
+          'knockturn-home-button',
+          'Close Portal',
+          '#b42332',
+          () => window.timesheetAPI?.close()
+        );
+        if (window.location.origin === ${JSON.stringify(pmsOrigin)}) {
+          makeButton(
+            'knockturn-pms-button',
+            'Back to Timesheet',
+            '#175cd3',
+            () => window.timesheetAPI?.openTimesheet()
+          );
+        } else {
+          makeButton(
+            'knockturn-pms-button',
+            'Go to PMS',
+            '#175cd3',
+            () => window.timesheetAPI?.openPms()
+          );
+        }
         document.body.appendChild(actions);
       })();`).catch(error => {
         console.error('[TimesheetIPC] Failed to inject portal action buttons:', error);
@@ -1338,8 +1365,12 @@ ipcMain.handle('open-timesheet-browser', async () => {
     });
     timesheetWin.once('closed', () => {
       if (timesheetWindow === timesheetWin) timesheetWindow = null;
+      timesheetPortalUrl = null;
       lockedChildWindowOpen = false;
       if (windowLocked) {
+        if (process.platform === 'darwin') {
+          mainWindow?.setAlwaysOnTop(true, 'screen-saver');
+        }
         mainWindow?.show();
         mainWindow?.focus();
       }
@@ -1372,6 +1403,26 @@ ipcMain.handle('open-pms-from-timesheet', async (event) => {
     return true;
   } catch (error) {
     console.error('[TimesheetIPC] Failed to open PMS from timesheet window:', error);
+    return false;
+  }
+});
+
+ipcMain.handle('open-timesheet-from-pms', async (event) => {
+  if (!timesheetWindow || timesheetWindow.isDestroyed() || event.sender !== timesheetWindow.webContents) {
+    return false;
+  }
+  if (!timesheetPortalUrl) {
+    console.error('[TimesheetIPC] Cannot return to timesheet portal: original URL is unavailable');
+    return false;
+  }
+
+  try {
+    await timesheetWindow.loadURL(timesheetPortalUrl);
+    timesheetWindow.show();
+    timesheetWindow.focus();
+    return true;
+  } catch (error) {
+    console.error('[TimesheetIPC] Failed to return to timesheet portal:', error);
     return false;
   }
 });
