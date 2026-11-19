@@ -224,6 +224,22 @@ function hasActiveEmployeeSession() {
   );
 }
 
+// While the PMS/LMS portal iframe is showing, native popups (the <input type="date">
+// calendar, <select> lists) are separate OS windows at a normal level. A 'screen-saver'
+// level main window would cover them, so we drop to 'floating' (still above normal apps).
+let portalPopupMode = false;
+function lockedWindowLevel(): 'screen-saver' | 'floating' {
+  return portalPopupMode ? 'floating' : 'screen-saver';
+}
+
+ipcMain.handle('set-portal-popup-mode', async (_, enabled: boolean) => {
+  portalPopupMode = !!enabled;
+  if (process.platform === 'darwin' && windowLocked && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setAlwaysOnTop(true, lockedWindowLevel());
+  }
+  return true;
+});
+
 function refocusLockedWindow() {
   if (process.platform !== 'darwin' || !windowLocked || lockedChildWindowOpen || isIdlePromptWindowOpen() || !mainWindow || mainWindow.isDestroyed()) return;
 
@@ -231,7 +247,7 @@ function refocusLockedWindow() {
     if (mainWindow.isMinimized()) mainWindow.restore();
     if (!mainWindow.isVisible()) mainWindow.show();
     if (!mainWindow.isFocused()) {
-      mainWindow.setAlwaysOnTop(true, 'screen-saver');
+      mainWindow.setAlwaysOnTop(true, lockedWindowLevel());
       mainWindow.moveTop();
       app.focus({ steal: true });
       mainWindow.focus();

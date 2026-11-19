@@ -112,6 +112,7 @@ const electronAPI = {
     ipcRenderer.on('timesheet-unlock', () => callback());
   },
   openTimesheetBrowser: () => ipcRenderer.invoke('open-timesheet-browser'),
+  setPortalPopupMode: (enabled) => ipcRenderer.invoke('set-portal-popup-mode', enabled),
   verifyTimesheetRealtime: (empCode) => ipcRenderer.invoke('verify-timesheet-realtime', empCode),
   verifyManualLockRealtime: (empCode) => ipcRenderer.invoke('verify-manual-lock-realtime', empCode),
   getComplianceDetails: (empCode, empId, dateStr) => ipcRenderer.invoke('get-compliance-details', empCode, empId, dateStr),

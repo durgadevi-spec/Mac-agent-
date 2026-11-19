@@ -58,6 +58,15 @@ export default function PlanOfDay({
     return () => window.removeEventListener('keydown', handleZoomShortcut);
   }, [adjustPortalZoom, phase]);
 
+  // Lower the locked window's level while the PMS/LMS iframe is visible so native
+  // popups (date picker calendar) can appear above it. Restored on leaving the form.
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (phase !== 'form') return;
+    api?.setPortalPopupMode?.(true);
+    return () => { api?.setPortalPopupMode?.(false); };
+  }, [phase]);
+
   useEffect(() => {
     if (portalOpened) return;
     setPortalOpened(true);
