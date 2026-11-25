@@ -69,7 +69,9 @@ import {
   AppClassification as ClassificationType,
   fetchAppSettings,
   updateAppSetting,
-  logTimesheetLockEvent
+  logTimesheetLockEvent,
+  supabase,
+  getSupabaseFunctionErrorMessage
 } from '../lib/supabase';
 
 
@@ -101,9 +103,53 @@ interface EmployeeQuickView {
   lastSessionDate?: string;
   employee_code?: string;
   timesheetStatus?: boolean | null;
-  manuallyLocked?: boolean;
+  currentLockStatus?: boolean | null;
   shift_start?: string;
   shift_end?: string;
+}
+
+interface TimesheetElectronApi {
+  checkTimesheetsSubmittedBatch?: (
+    employeeCodes: string[],
+    date: string
+  ) => Promise<{ results?: Record<string, boolean> }>;
+}
+
+async function fetchTimesheetStatusResults(
+  employeeCodes: string[],
+  date: string,
+  adminToken: string | null
+): Promise<Record<string, boolean>> {
+  const electronApi = (window as Window & { electronAPI?: TimesheetElectronApi }).electronAPI;
+
+  if (adminToken) {
+    try {
+      const { data, error } = await supabase.functions.invoke('mac-agent-control', {
+        body: { action: 'timesheet-status', employee_codes: employeeCodes, date },
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      if (error) throw new Error(await getSupabaseFunctionErrorMessage(error));
+      if (data?.error) throw new Error(data.error);
+      if (!data?.results || typeof data.results !== 'object') {
+        throw new Error('The timesheet status service returned an invalid response.');
+      }
+      if (Object.keys(data.results).length === 0) {
+        throw new Error('No matching employee codes were found in the timesheet system.');
+      }
+      return data.results;
+    } catch (error) {
+      if (!electronApi?.checkTimesheetsSubmittedBatch) throw error;
+      console.warn('Server-side timesheet verification failed; trying the desktop verifier.', error);
+    }
+  }
+
+  if (electronApi?.checkTimesheetsSubmittedBatch) {
+    const { results } = await electronApi.checkTimesheetsSubmittedBatch(employeeCodes, date);
+    if (results && typeof results === 'object' && Object.keys(results).length > 0) return results;
+    throw new Error('No matching employee codes were found in the timesheet system.');
+  }
+
+  throw new Error('Timesheet verification is unavailable. Sign in as an administrator or use the desktop app.');
 }
 
 interface AdminMonitoringScreenProps {
@@ -163,6 +209,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
   const [themeMode, setThemeMode] = useState<'light' | 'dark'>('light');
   const [accessControlSearch, setAccessControlSearch] = useState('');
   const [accessControlTab, setAccessControlTab] = useState<'mac-agent' | 'timesheet'>('mac-agent');
+  const [timesheetVerificationError, setTimesheetVerificationError] = useState('');
   const [_allRecentSessions, setAllRecentSessions] = useState<WorkSession[]>([]);
 
   // Employee Add / App Config State
@@ -527,22 +574,18 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
       sessions.forEach((session) => sessionMap.set(session.employee_id, session));
 
       const latestLockReasonByEmployee = new Map<string, string>();
-      const manuallyLockedByEmployee = new Map<string, boolean>();
+      const currentLockStatusByEmployee = new Map<string, boolean>();
       lockLogs.forEach((log) => {
-        if (!latestLockReasonByEmployee.has(log.employee_id)) {
-          if (log.reason && log.reason.trim()) {
-            latestLockReasonByEmployee.set(log.employee_id, log.reason.trim());
-          }
+        const isLockStateEvent = ['LOCKED', 'AUTO_UNLOCK', 'MANUAL_LOCK', 'MANUAL_UNLOCK'].includes(log.event_type);
+        if (isLockStateEvent && !latestLockReasonByEmployee.has(log.employee_id)) {
+          latestLockReasonByEmployee.set(log.employee_id, log.reason?.trim() || '');
         }
-        if (
-          !manuallyLockedByEmployee.has(log.employee_id) &&
-          (log.event_type === 'MANUAL_LOCK' || log.event_type === 'MANUAL_UNLOCK')
-        ) {
-          const unlockIsCurrent = Date.now() - new Date(log.created_at).getTime() < 18 * 60 * 60 * 1000;
-          manuallyLockedByEmployee.set(
-            log.employee_id,
-            log.event_type === 'MANUAL_LOCK' || !unlockIsCurrent
-          );
+        if (!currentLockStatusByEmployee.has(log.employee_id)) {
+          if (log.event_type === 'LOCKED' || log.event_type === 'MANUAL_LOCK') {
+            currentLockStatusByEmployee.set(log.employee_id, true);
+          } else if (log.event_type === 'AUTO_UNLOCK' || log.event_type === 'MANUAL_UNLOCK') {
+            currentLockStatusByEmployee.set(log.employee_id, false);
+          }
         }
       });
 
@@ -580,8 +623,8 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
           activeSeconds,
           idleSeconds,
           productiveSeconds,
-          lastLockReason: latestLockReasonByEmployee.get(employee.id) ?? null,
-          manuallyLocked: manuallyLockedByEmployee.get(employee.id) ?? false,
+          lastLockReason: latestLockReasonByEmployee.get(employee.id) || null,
+          currentLockStatus: currentLockStatusByEmployee.get(employee.id) ?? null,
           agentInstalled,
           lastSessionDate,
           employee_code: employee.employee_code,
@@ -591,33 +634,18 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
         };
       });
 
-      // Fetch batch timesheet status
-      try {
-        const eApi = (window as any).electronAPI;
-        if (eApi?.checkTimesheetsSubmittedBatch) {
-          const empCodes = updatedEmployeeList
-            .map(e => e.employee_code)
-            .filter((c): c is string => !!c);
-
-          if (empCodes.length > 0) {
-            const { results } = await eApi.checkTimesheetsSubmittedBatch(empCodes, accessControlDate);
-            updatedEmployeeList.forEach(e => {
-              const result = e.employee_code ? results[e.employee_code] : undefined;
-              e.timesheetStatus = typeof result === 'boolean' ? result : null;
-            });
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch batch timesheet status', err);
-        updatedEmployeeList.forEach(e => { e.timesheetStatus = null; });
-      }
-
       const statusCounts = { online: 0, idle: 0, away: 0, offline: 0 };
       updatedEmployeeList.forEach((emp) => {
         statusCounts[emp.status] += 1;
       });
 
-      setEmployeesList(updatedEmployeeList);
+      setEmployeesList(prev => {
+        const previousStatuses = new Map(prev.map(employee => [employee.id, employee.timesheetStatus]));
+        return updatedEmployeeList.map(employee => ({
+          ...employee,
+          timesheetStatus: previousStatuses.get(employee.id) ?? null,
+        }));
+      });
       setAllRecentSessions(allSessions);
       setStatusDistribution([
         { name: 'Online', value: statusCounts.online, color: '#10b981' },
@@ -664,35 +692,57 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch Timesheet Status when accessControlDate changes
+  // Fetch timesheet status on initial load, when the date changes, and periodically.
+  const employeeCodesSnapshot = JSON.stringify(employeesList.map(employee => employee.employee_code || null));
   useEffect(() => {
-    const fetchTimesheetStatuses = async () => {
-      try {
-        const eApi = (window as any).electronAPI;
-        if (eApi?.checkTimesheetsSubmittedBatch && accessControlDate && employeesList.length > 0) {
-          const empCodes = employeesList
-            .map(e => e.employee_code)
-            .filter((c): c is string => !!c);
+    let active = true;
+    let requestInFlight = false;
 
-          if (empCodes.length > 0) {
-            const { results } = await eApi.checkTimesheetsSubmittedBatch(empCodes, accessControlDate);
-            setEmployeesList(prev => prev.map(e => {
-              const result = e.employee_code ? results[e.employee_code] : undefined;
-              return { ...e, timesheetStatus: typeof result === 'boolean' ? result : null };
-            }));
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch batch timesheet status', err);
+    const fetchTimesheetStatuses = async () => {
+      if (requestInFlight || !accessControlDate || employeeCodesSnapshot === '[]') return;
+      const codeValues: unknown = JSON.parse(employeeCodesSnapshot);
+      const empCodes = Array.isArray(codeValues)
+        ? codeValues.filter((code): code is string => typeof code === 'string' && !!code)
+        : [];
+      if (empCodes.length === 0) {
+        setTimesheetVerificationError('Timesheet status is unavailable because employee codes are missing.');
+        return;
+      }
+
+      requestInFlight = true;
+      try {
+        const results = await fetchTimesheetStatusResults(empCodes, accessControlDate, macAgentAdminToken);
+        if (!active) return;
+        const normalizedResults = new Map(
+          Object.entries(results).map(([code, submitted]) => [code.trim().toUpperCase(), submitted])
+        );
+        setEmployeesList(prev => prev.map(e => {
+          const result = e.employee_code
+            ? normalizedResults.get(e.employee_code.trim().toUpperCase())
+            : undefined;
+          return { ...e, timesheetStatus: typeof result === 'boolean' ? result : null };
+        }));
+        setTimesheetVerificationError('');
+      } catch (error) {
+        if (!active) return;
+        console.error('Failed to fetch batch timesheet status', error);
+        setTimesheetVerificationError(error instanceof Error ? error.message : 'Could not verify timesheet status.');
+      } finally {
+        requestInFlight = false;
       }
     };
 
-    // Only refetch if we already have employees loaded (initial load is handled by loadAdminStats)
-    if (employeesList.length > 0) {
+    if (employeeCodesSnapshot) {
       setEmployeesList(prev => prev.map(e => ({ ...e, timesheetStatus: null })));
-      fetchTimesheetStatuses();
+      void fetchTimesheetStatuses();
     }
-  }, [accessControlDate]);
+
+    const interval = setInterval(() => void fetchTimesheetStatuses(), 60000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [accessControlDate, employeeCodesSnapshot, macAgentAdminToken]);
 
   // Handlers
   const totalEmployees = employeesList.length;
@@ -835,7 +885,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
       const logged = await logTimesheetLockEvent(emp.id, emp.name, 'MANUAL_LOCK', undefined, 'Administrator', reason);
       if (!logged) throw new Error('Manual lock event could not be saved');
 
-      setEmployeesList(prev => prev.map(e => e.id === emp.id ? { ...e, manuallyLocked: true } : e));
+      setEmployeesList(prev => prev.map(e => e.id === emp.id ? { ...e, currentLockStatus: true, lastLockReason: reason } : e));
 
       if (emp.status !== 'online') {
         setToastMessage(`Employee is offline. Lock command will be applied when the Agent reconnects.`);
@@ -863,7 +913,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
       const logged = await logTimesheetLockEvent(emp.id, emp.name, 'MANUAL_UNLOCK', undefined, 'Administrator', reason);
       if (!logged) throw new Error('Manual unlock event could not be saved');
 
-      setEmployeesList(prev => prev.map(e => e.id === emp.id ? { ...e, manuallyLocked: false } : e));
+      setEmployeesList(prev => prev.map(e => e.id === emp.id ? { ...e, currentLockStatus: false, lastLockReason: reason } : e));
 
       setToastMessage(`Unlocked ${emp.name} successfully!`);
       setShowToast(true);
@@ -3217,6 +3267,12 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
                   </div>
                 </div>
 
+                {timesheetVerificationError && (
+                  <div role="alert" className="px-5 py-3 text-sm text-rose-700 bg-rose-50 border-b border-rose-100">
+                    {timesheetVerificationError}
+                  </div>
+                )}
+
                 {/* Table View */}
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
@@ -3227,7 +3283,8 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
                         <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Role</th>
                         <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Agent Status</th>
                         <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Timesheet ({accessControlDate ? accessControlDate : 'N/A'})</th>
-                        <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Last Lock Reason</th>
+                        <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Latest Lock/Unlock Reason</th>
+                        <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Last Recorded Lock State</th>
                         <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Last Active Session</th>
                         <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Actions</th>
                       </tr>
@@ -3246,7 +3303,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
                         if (filtered.length === 0) {
                           return (
                             <tr>
-                              <td colSpan={7} className="text-center py-12 text-slate-400 text-sm">
+                              <td colSpan={9} className="text-center py-12 text-slate-400 text-sm">
                                 <Shield className="w-8 h-8 mx-auto mb-2 opacity-30 text-slate-500" />
                                 No matching employees found.
                               </td>
@@ -3294,7 +3351,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
                               ) : (
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200/50">
                                   <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-                                  Not verified
+                                  Unavailable
                                 </span>
                               )}
                             </td>
@@ -3305,6 +3362,24 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
                                 </span>
                               ) : (
                                 <span className="text-slate-400 italic">No reason logged</span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4">
+                              {emp.currentLockStatus === true ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200/50" title="Latest recorded lock event indicates the employee is locked">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                                  Locked
+                                </span>
+                              ) : emp.currentLockStatus === false ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200/50" title="Latest recorded lock event indicates the employee is unlocked">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                                  Unlocked
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200/50" title="No lock or unlock event has been recorded">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                                  Unknown
+                                </span>
                               )}
                             </td>
                             <td className="px-6 py-4 text-sm text-slate-500">
@@ -3327,7 +3402,7 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
                                   {isFetchingCompliance === emp.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Eye className="w-3 h-3" />}
                                   View Compliance
                                 </button>
-                                {emp.manuallyLocked && (
+                                {emp.currentLockStatus === true && (
                                   <button
                                     onClick={() => handleReleaseUser(emp)}
                                     disabled={releasingUserId === emp.id}
@@ -3337,14 +3412,14 @@ const AdminMonitoringScreen: React.FC<AdminMonitoringScreenProps> = ({
                                     Release Lock
                                   </button>
                                 )}
-                                {!emp.manuallyLocked && (
+                                {emp.currentLockStatus !== true && (
                                   <button
                                     onClick={() => handleLockUser(emp)}
                                     disabled={releasingUserId === emp.id}
                                     className="text-xs font-semibold text-white bg-red-500 hover:bg-red-600 px-3 py-1.5 rounded-lg transition disabled:opacity-50 inline-flex items-center gap-1.5"
                                   >
                                     {releasingUserId === emp.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Shield className="w-3 h-3" />}
-                                    Lock Now
+                                    Manual Lock
                                   </button>
                                 )}
                               </div>

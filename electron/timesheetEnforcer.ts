@@ -1,6 +1,6 @@
 import { BrowserWindow, Notification } from 'electron';
 import pg from 'pg';
-import { supabase } from '../src/lib/supabase.js';
+import { logTimesheetLockEvent, supabase } from '../src/lib/supabase.js';
 
 let enforcerInterval: NodeJS.Timeout | null = null;
 let currentEmployee: any = null;
@@ -316,6 +316,45 @@ export async function verifyManualLockForEmployee(employeeCode: string): Promise
   }
 }
 
+async function recordAutomaticLockState(locked: boolean, date: string, reason: string) {
+  if (!currentEmployee?.id) return;
+
+  try {
+    const { data: latestEvents, error } = await supabase
+      .from('timesheet_lock_logs')
+      .select('event_type')
+      .eq('employee_id', currentEmployee.id)
+      .in('event_type', ['LOCKED', 'AUTO_UNLOCK', 'MANUAL_LOCK', 'MANUAL_UNLOCK'])
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error('[TimesheetEnforcer] Unable to check the latest lock event:', error);
+      return;
+    }
+
+    const latestEvent = latestEvents?.[0]?.event_type;
+    const latestLocked = latestEvent === 'LOCKED' || latestEvent === 'MANUAL_LOCK';
+    if (latestEvent && latestLocked === locked) return;
+    if (!latestEvent && !locked) return;
+
+    const eventType = locked ? 'LOCKED' : 'AUTO_UNLOCK';
+    const logged = await logTimesheetLockEvent(
+      currentEmployee.id,
+      currentEmployee.employee_name || currentEmployee.employee_code,
+      eventType,
+      undefined,
+      undefined,
+      reason
+    );
+    if (!logged) {
+      console.error('[TimesheetEnforcer] Failed to record automatic lock state for', date);
+    }
+  } catch (error) {
+    console.error('[TimesheetEnforcer] Unable to record automatic lock state for', date, error);
+  }
+}
+
 export async function getComplianceDetails(empCode: string, empId: string, dateStr: string): Promise<any> {
   let emp: any = null;
   // Try by empId first (most reliable), then fallback to empCode
@@ -421,6 +460,7 @@ export async function startTimesheetEnforcer(empCode: string, mainWindow: Browse
     }
 
     if (getWeekday(todayDate) === 'Sun') {
+      void recordAutomaticLockState(false, todayDate, 'Timesheet lock bypassed for Sunday');
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('timesheet-unlock');
       }
@@ -430,6 +470,7 @@ export async function startTimesheetEnforcer(empCode: string, mainWindow: Browse
     const todayLeaveStatus = await checkLeaveStatus(currentEmployee.employee_code, todayDate);
     if (todayLeaveStatus.isOnLeave) {
       console.log('[TimesheetEnforcer] Current-day leave bypass for', currentEmployee.employee_code, todayDate, 'Reason:', todayLeaveStatus.reason);
+      void recordAutomaticLockState(false, todayDate, 'Timesheet lock bypassed for approved leave');
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('timesheet-unlock');
       }
@@ -438,6 +479,7 @@ export async function startTimesheetEnforcer(empCode: string, mainWindow: Browse
 
     const prevDate = await getPreviousNonLeaveWorkingDate(currentEmployee.employee_code, todayDate);
     if (!prevDate) {
+      void recordAutomaticLockState(false, todayDate, 'Timesheet lock bypassed for non-working day');
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('timesheet-unlock');
       }
@@ -447,6 +489,7 @@ export async function startTimesheetEnforcer(empCode: string, mainWindow: Browse
     const isSubmitted = await checkTimesheetSubmitted(currentEmployee.employee_code, prevDate);
     console.log('[TimesheetEnforcer] Submitted check for', currentEmployee.employee_code, prevDate, '=>', isSubmitted);
     if (isSubmitted) {
+      void recordAutomaticLockState(false, prevDate, `Timesheet submitted for ${prevDate}`);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('timesheet-status', { submitted: true, date: prevDate });
         mainWindow.webContents.send('timesheet-unlock'); // Just in case it's locked
@@ -467,10 +510,12 @@ export async function startTimesheetEnforcer(empCode: string, mainWindow: Browse
 
     if (currentMins >= lockMins) {
       // TRIGGER LOCK
+      void recordAutomaticLockState(true, prevDate, `Timesheet not submitted for ${prevDate}`);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('timesheet-lock', { date: prevDate });
       }
     } else if (currentMins >= warnMins) {
+      void recordAutomaticLockState(false, prevDate, 'Timesheet is still within the warning period');
       // Warn once per previous-workday, even though rules are evaluated every minute.
       if (lastTimesheetWarningDate !== prevDate && mainWindow && !mainWindow.isDestroyed()) {
         lastTimesheetWarningDate = prevDate;
@@ -480,6 +525,7 @@ export async function startTimesheetEnforcer(empCode: string, mainWindow: Browse
         });
       }
     } else if (currentMins >= checkMins) {
+      void recordAutomaticLockState(false, prevDate, 'Timesheet is still within the check period');
       // Initial Check - Maybe send a status or a native notification
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('timesheet-status', { submitted: false, date: prevDate });

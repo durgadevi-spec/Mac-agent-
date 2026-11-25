@@ -233,3 +233,14 @@ All changes maintain backward compatibility:
 - [electron/timesheetEnforcer.ts](electron/timesheetEnforcer.ts) - Enforcer updates
 - [src/components/PlanOfDay.tsx](src/components/PlanOfDay.tsx) - Error messages
 - [package.json](package.json) - Build configuration
+
+## Browser Access Control Timesheet Status
+
+The browser dashboard verifies timesheet status through the authenticated
+`mac-agent-control` Supabase Edge Function. Configure `TIMESHEET_DB_URL` as a
+Supabase Edge Function secret (never as a browser/Vite variable), then deploy
+the updated function. The request uses the existing administrator session token;
+the database connection string is only read by the Edge Function.
+
+If the secret is missing or the query fails, the dashboard displays
+`Unavailable` instead of incorrectly reporting a submitted or pending status.

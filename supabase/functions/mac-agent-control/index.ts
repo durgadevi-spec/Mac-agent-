@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import postgres from 'npm:postgres@3.4.5';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -363,6 +364,68 @@ Deno.serve(async (request: Request) => {
   if (action === 'admin-status') {
     if (!await adminForToken(request)) return json({ error: 'Admin authorization expired. Sign in again.' }, 401);
     return await adminStatus(request);
+  }
+
+  if (action === 'timesheet-status') {
+    if (!await adminForToken(request)) return json({ error: 'Admin authorization expired. Sign in again.' }, 401);
+
+    const date = String(body.date || '');
+    const requestedCodes = Array.isArray(body.employee_codes)
+      ? body.employee_codes
+        .filter((code: unknown): code is string => typeof code === 'string')
+        .map((code: string) => code.trim().toUpperCase())
+        .filter(Boolean)
+      : [];
+    const employeeCodes = [...new Set(requestedCodes)];
+
+    const parsedDate = new Date(`${date}T00:00:00.000Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date) {
+      return json({ error: 'A valid timesheet date is required.' }, 400);
+    }
+    if (!Array.isArray(body.employee_codes) || body.employee_codes.length === 0 || body.employee_codes.length > 500 || employeeCodes.length === 0) {
+      return json({ error: 'Provide between 1 and 500 employee codes.' }, 400);
+    }
+
+    const timesheetDbUrl = Deno.env.get('TIMESHEET_DB_URL');
+    if (!timesheetDbUrl) return json({ error: 'Timesheet status verification is not configured.' }, 503);
+
+    const timesheetDb = postgres(timesheetDbUrl, {
+      ssl: { rejectUnauthorized: false },
+      max: 1,
+      connect_timeout: 8,
+    });
+
+    try {
+      const rows = await timesheetDb`
+        SELECT upper(trim(e.employee_code)) AS employee_code,
+               (COALESCE(te.entry_count, 0) > 0 OR COALESCE(ds.submission_count, 0) > 0) AS submitted
+        FROM employees e
+        LEFT JOIN (
+          SELECT employee_id, COUNT(*) AS entry_count
+          FROM time_entries
+          WHERE date = ${date} AND status NOT IN ('draft', 'rejected')
+          GROUP BY employee_id
+        ) te ON te.employee_id = e.id
+        LEFT JOIN (
+          SELECT employee_id, COUNT(*) AS submission_count
+          FROM daily_submissions
+          WHERE date = ${date}
+          GROUP BY employee_id
+        ) ds ON ds.employee_id = e.id
+        WHERE upper(trim(e.employee_code)) = ANY(${timesheetDb.array(employeeCodes, 'text')})
+      `;
+
+      const results: Record<string, boolean> = {};
+      for (const row of rows) {
+        if (row.employee_code) results[row.employee_code] = row.submitted === true;
+      }
+      return json({ results });
+    } catch (error) {
+      console.error('[TimesheetStatus] Verification query failed:', error);
+      return json({ error: 'Could not verify timesheet status.' }, 502);
+    } finally {
+      await timesheetDb.end({ timeout: 5 });
+    }
   }
 
   if (action === 'admin-close') {
